@@ -14,8 +14,12 @@ import com.inductiveautomation.ignition.common.project.ProjectManifest;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.inductiveautomation.ignition.gateway.localdb.persistence.PersistenceInterface;
 import com.inductiveautomation.ignition.gateway.project.ProjectManager;
+import org.apache.commons.io.FileUtils;
 import org.yaml.snakeyaml.Yaml;
 import simpleorm.dataset.SQuery;
+import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.ResetCommand;
+import org.eclipse.jgit.api.errors.GitAPIException;
 
 import java.io.*;
 import java.lang.reflect.Field;
@@ -42,83 +46,45 @@ public class GitCommissioningUtils {
         try {
             if (yamlConfigPath.toFile().exists() && yamlConfigPath.toFile().isFile()) {
                 ProjectConfigs projectConfigs = parseYaml(yamlConfigPath);
-//                GitCommissioningConfig projectConfigs = parseConfigLines(yamlBytes);
+                // GitCommissioningConfig projectConfigs = parseConfigLines(yamlBytes);
 
                 if (projectConfigs != null) {
+                    // First pass: Create parent projects
                     for (ProjectConfig projectConfig : projectConfigs.getProjects()) {
                         GitCommissioningConfig gitConfig = new GitCommissioningConfig();
                         gitConfig.loadFromProjectConfig(projectConfig);
 
-                        config = gitConfig;
-                        if (projectManager.getProjectNames().contains(gitConfig.getIgnitionProjectName())) {
-                            logger.info("The configuration of the git module was interrupted because the project '" + config.getIgnitionProjectName() + "' already exist.");
-                            return;
+                        // Skip if this project has a parent (we'll handle it in the second pass)
+                        if (gitConfig.getIgnitionProjectParentName() != null
+                                && !gitConfig.getIgnitionProjectParentName().isEmpty()) {
+                            continue;
                         }
 
-                        if (config.getRepoURI() == null || config.getRepoBranch() == null
-                                || config.getIgnitionProjectName() == null || config.getIgnitionUserName() == null
-                                || config.getUserName() == null || (config.getUserPassword() == null && config.getSshKey() == null)
-                                || config.getUserEmail() == null) {
-                            throw new RuntimeException("Incomplete git configuration file.");
+                        // Process parent project
+                        processProject(gitConfig, projectManager);
+                    }
+
+                    // Second pass: Create child projects
+                    for (ProjectConfig projectConfig : projectConfigs.getProjects()) {
+                        GitCommissioningConfig gitConfig = new GitCommissioningConfig();
+                        gitConfig.loadFromProjectConfig(projectConfig);
+
+                        // Skip if this project has no parent (already handled in first pass)
+                        if (gitConfig.getIgnitionProjectParentName() == null
+                                || gitConfig.getIgnitionProjectParentName().isEmpty()) {
+                            continue;
                         }
 
-                        projectManager.createProject(config.getIgnitionProjectName(), new ProjectManifest(config.getIgnitionProjectName(), "", false, config.isIgnitionProjectInheritable(), config.getIgnitionProjectParentName()), new ArrayList());
-
-                        Path projectDir = getProjectFolderPath(config.getIgnitionProjectName());
-                        clearDirectory(projectDir);
-
-                        // Creation of records
-                        PersistenceInterface persistenceInterface = context.getPersistenceInterface();
-                        SQuery<GitProjectsConfigRecord> query = new SQuery<>(GitProjectsConfigRecord.META).eq(GitProjectsConfigRecord.ProjectName, config.getIgnitionProjectName());
-                        if (persistenceInterface.queryOne(query) != null) {
-                            logger.info("The configuration of the git module was interrupted because the GitProjectsConfigRecord '" + config.getIgnitionProjectName() + "' already exist.");
-                            return;
-                        }
-                        GitProjectsConfigRecord projectsConfigRecord = persistenceInterface.createNew(GitProjectsConfigRecord.META);
-                        projectsConfigRecord.setProjectName(config.getIgnitionProjectName());
-                        projectsConfigRecord.setURI(config.getRepoURI());
-
-                        String userSecretFilePath = System.getenv("GATEWAY_GIT_USER_SECRET_FILE");
-                        if (userSecretFilePath != null) {
-                            config.setSecretFromFilePath(Paths.get(userSecretFilePath), projectsConfigRecord.isSSHAuthentication());
-                        }
-                        if (config.getSshKey() == null && config.getUserPassword() == null) {
-                            throw new Exception("Git User Password or SSHKey not configured.");
-                        }
-                        persistenceInterface.save(projectsConfigRecord);
-
-                        GitReposUsersRecord reposUsersRecord = persistenceInterface.createNew(GitReposUsersRecord.META);
-                        reposUsersRecord.setUserName(config.getUserName());
-                        reposUsersRecord.setIgnitionUser(config.getIgnitionUserName());
-                        reposUsersRecord.setProjectId(projectsConfigRecord.getId());
-                        if (projectsConfigRecord.isSSHAuthentication()) {
-                            reposUsersRecord.setSSHKey(config.getSshKey());
-                        } else {
-                            reposUsersRecord.setPassword(config.getUserPassword());
-                        }
-                        reposUsersRecord.setEmail(config.getUserEmail());
-                        persistenceInterface.save(reposUsersRecord);
-
-                        // CLONE PROJECT
-                        cloneRepo(config.getIgnitionProjectName(), config.getIgnitionUserName(), config.getRepoURI(), config.getRepoBranch());
-
-                        // IMPORT PROJECT
-                        GitProjectManager.importProject(config.getIgnitionProjectName());
-
-                        // IMPORT TAGS
-                        if (config.isImportTags()) {
-                            GitTagManager.importTagManager(config.getIgnitionProjectName());
+                        // Verify parent exists
+                        if (!projectManager.getProjectNames().contains(gitConfig.getIgnitionProjectParentName())) {
+                            logger.error("Cannot create project '" + gitConfig.getIgnitionProjectName() +
+                                    "' because parent project '" + gitConfig.getIgnitionProjectParentName()
+                                    + "' does not exist.");
+                            continue;
                         }
 
-                        // IMPORT THEMES
-                        if (config.isImportThemes()) {
-                            GitThemeManager.importTheme(config.getIgnitionProjectName());
-                        }
-
-                        // IMPORT IMAGES
-                        if (config.isImportImages()) {
-                            GitImageManager.importImages(config.getIgnitionProjectName());
-                        }
+                        // Process child project
+                        processProject(gitConfig, projectManager);
                     }
                 }
             } else {
@@ -131,7 +97,7 @@ public class GitCommissioningUtils {
 
     protected static ProjectConfigs parseYaml(Path yamlFilePath) {
         try (InputStream inputStream = new FileInputStream(yamlFilePath.toFile())) {
-//            Yaml yaml = new Yaml(new Constructor(ProjectConfigs.class));
+            // Yaml yaml = new Yaml(new Constructor(ProjectConfigs.class));
             Yaml yaml = new Yaml();
             Object obj = yaml.load(inputStream);
 
@@ -155,25 +121,26 @@ public class GitCommissioningUtils {
                             Object value = entry.getValue();
                             if (value != null) {
                                 if (field.getType().isAssignableFrom(value.getClass())) {
-                                    logger.info("Successful addition of field: " + fieldName+ ": " + value);
+                                    logger.info("Successful addition of field: " + fieldName + ": " + value);
                                     field.set(config, value);
                                 } else {
                                     // Handle type conversion if necessary, e.g., for Boolean fields
                                     if (field.getType().equals(Boolean.class) && value instanceof String) {
-                                        logger.info("Successful addition of field: " + fieldName+ ": " + value);
+                                        logger.info("Successful addition of field: " + fieldName + ": " + value);
                                         field.set(config, Boolean.parseBoolean((String) value));
                                     } else {
                                         // Log or throw an error for unsupported types
-                                        //                                    System.err.println("Unsupported type conversion for field: " + fieldName);
+                                        // System.err.println("Unsupported type conversion for field: " + fieldName);
                                         logger.warn("Unsupported type conversion for field: " + fieldName);
                                     }
                                 }
                             } else {
                                 // If value is null and the field type supports null, set it directly.
-                                // This is particularly relevant for object wrapper types like Boolean, String, etc.
+                                // This is particularly relevant for object wrapper types like Boolean, String,
+                                // etc.
                                 if (!field.getType().isPrimitive()) {
                                     field.set(config, null);
-                                    logger.info("Successful addition of field: " + fieldName+ ": null");
+                                    logger.info("Successful addition of field: " + fieldName + ": null");
                                 } else {
                                     // For primitive fields, you might decide to leave the default value
                                     // or handle it according to your application's needs.
@@ -197,7 +164,164 @@ public class GitCommissioningUtils {
         return null;
     }
 
+    private static void processProject(GitCommissioningConfig config, ProjectManager projectManager) {
+        try {
+            logger.info("Starting to process project: " + config.getIgnitionProjectName());
+
+            // Validate configuration
+            if (config.getRepoURI() == null || config.getRepoBranch() == null
+                    || config.getIgnitionProjectName() == null || config.getIgnitionUserName() == null
+                    || config.getUserName() == null || (config.getUserPassword() == null && config.getSshKey() == null)
+                    || config.getUserEmail() == null) {
+                logger.error("Incomplete configuration for project: " + config.getIgnitionProjectName());
+                throw new RuntimeException("Incomplete git configuration file.");
+            }
+
+            // Create Git records first
+            logger.info("Setting up Git configuration records");
+            PersistenceInterface persistenceInterface = context.getPersistenceInterface();
+
+            // Create project config record
+            GitProjectsConfigRecord projectsConfigRecord = persistenceInterface.createNew(GitProjectsConfigRecord.META);
+            projectsConfigRecord.setProjectName(config.getIgnitionProjectName());
+            projectsConfigRecord.setURI(config.getRepoURI());
+
+            String userSecretFilePath = System.getenv("GATEWAY_GIT_USER_SECRET_FILE");
+            if (userSecretFilePath != null) {
+                config.setSecretFromFilePath(Paths.get(userSecretFilePath), projectsConfigRecord.isSSHAuthentication());
+            }
+            if (config.getSshKey() == null && config.getUserPassword() == null) {
+                throw new Exception("Git User Password or SSHKey not configured.");
+            }
+            persistenceInterface.save(projectsConfigRecord);
+
+            // Verify project record was saved and get its ID
+            GitProjectsConfigRecord savedProject = persistenceInterface
+                    .queryOne(new SQuery<>(GitProjectsConfigRecord.META)
+                            .eq(GitProjectsConfigRecord.ProjectName, config.getIgnitionProjectName()));
+            if (savedProject == null) {
+                throw new Exception("Failed to save project configuration record");
+            }
+            logger.info("Created project record with ID: " + savedProject.getId());
+
+            // Create user record with verified project ID
+            GitReposUsersRecord reposUsersRecord = persistenceInterface.createNew(GitReposUsersRecord.META);
+            reposUsersRecord.setUserName(config.getUserName());
+            reposUsersRecord.setIgnitionUser(config.getIgnitionUserName());
+            reposUsersRecord.setProjectId(savedProject.getId()); // Use the verified ID
+            if (projectsConfigRecord.isSSHAuthentication()) {
+                reposUsersRecord.setSSHKey(config.getSshKey());
+            } else {
+                reposUsersRecord.setPassword(config.getUserPassword());
+            }
+            reposUsersRecord.setEmail(config.getUserEmail());
+            persistenceInterface.save(reposUsersRecord);
+
+            // Verify user record was saved
+            GitReposUsersRecord savedUser = persistenceInterface.queryOne(new SQuery<>(GitReposUsersRecord.META)
+                    .eq(GitReposUsersRecord.ProjectId, savedProject.getId())
+                    .eq(GitReposUsersRecord.IgnitionUser, config.getIgnitionUserName()));
+            if (savedUser == null) {
+                throw new Exception("Failed to save user record");
+            }
+            logger.info("Created user record for project ID: " + savedProject.getId());
+
+            // Create the project in Ignition first
+            logger.info("Creating project in Ignition");
+            projectManager.createProject(
+                    config.getIgnitionProjectName(),
+                    new ProjectManifest(
+                            config.getIgnitionProjectName(),
+                            "",
+                            true,
+                            config.isIgnitionProjectInheritable(),
+                            config.getIgnitionProjectParentName()),
+                    new ArrayList());
+
+            // Delete the project directory that Ignition created
+            Path projectDir = getProjectFolderPath(config.getIgnitionProjectName());
+            logger.info("Deleting project directory at: " + projectDir);
+            try {
+                if (projectDir.toFile().exists()) {
+                    FileUtils.deleteDirectory(projectDir.toFile());
+                }
+            } catch (IOException e) {
+                logger.error("Failed to delete project directory", e);
+                throw e;
+            }
+
+            // Now clone the repository into the clean directory
+            logger.info("Cloning repository: " + config.getRepoURI() + " branch: " + config.getRepoBranch());
+            cloneRepo(config.getIgnitionProjectName(), config.getIgnitionUserName(), config.getRepoURI(),
+                    config.getRepoBranch());
+
+            // Verify clone result
+            if (projectDir.toFile().exists()) {
+                logger.info("Directory exists after clone, contents: " +
+                        String.join(", ", projectDir.toFile().list()));
+                File gitDir = new File(projectDir.toFile(), ".git");
+                if (!gitDir.exists()) {
+                    logger.error("Git directory not found after clone");
+                    throw new RuntimeException("Git clone failed - .git directory not created");
+                }
+            } else {
+                logger.error("Project directory does not exist after clone attempt");
+                throw new RuntimeException("Git clone failed - directory not created");
+            }
+
+            // Only proceed with Git operations if clone was successful
+            try (Git git = Git.open(projectDir.toFile())) {
+                logger.info("Cleaning git repository");
+                git.clean()
+                        .setCleanDirectories(true)
+                        .setForce(true)
+                        .setIgnore(false)
+                        .call();
+
+                logger.info("Resetting to origin/" + config.getRepoBranch());
+                git.reset()
+                        .setMode(ResetCommand.ResetType.HARD)
+                        .setRef("origin/" + config.getRepoBranch())
+                        .call();
+
+                logger.info("Checking out branch: " + config.getRepoBranch());
+                git.checkout()
+                        .setName(config.getRepoBranch())
+                        .setForce(true)
+                        .setForceRefUpdate(true)
+                        .call();
+            }
+
+            // Import project resources
+            logger.info("Importing project resources");
+            GitProjectManager.importProject(config.getIgnitionProjectName());
+
+            // Import additional resources
+            if (config.isImportTags()) {
+                logger.info("Importing tags");
+                GitTagManager.importTagManager(config.getIgnitionProjectName());
+            }
+
+            if (config.isImportThemes()) {
+                logger.info("Importing themes");
+                GitThemeManager.importTheme(config.getIgnitionProjectName());
+            }
+
+            if (config.isImportImages()) {
+                logger.info("Importing images");
+                GitImageManager.importImages(config.getIgnitionProjectName());
+            }
+
+            logger.info("Successfully completed processing project: " + config.getIgnitionProjectName());
+
+        } catch (Exception e) {
+            logger.error("Error processing project " + config.getIgnitionProjectName(), e);
+            logger.error("Stack trace: ", e);
+        }
+    }
+
     private static String yamlKeyToFieldName(String yamlKey) {
+
         // If the YAML key exactly matches the field name, just return it.
         // This is a shortcut for cases where no conversion is necessary.
         // Remove this line if all keys need conversion.
@@ -225,4 +349,3 @@ public class GitCommissioningUtils {
         return fieldName.toString();
     }
 }
-
