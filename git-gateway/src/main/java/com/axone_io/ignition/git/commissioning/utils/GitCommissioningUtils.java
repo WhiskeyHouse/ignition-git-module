@@ -10,7 +10,7 @@ import com.axone_io.ignition.git.managers.GitThemeManager;
 import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
 import com.axone_io.ignition.git.records.GitReposUsersRecord;
 import com.google.common.eventbus.Subscribe;
-import com.inductiveautomation.ignition.common.project.ProjectManifest;
+import com.inductiveautomation.ignition.common.resourcecollection.ResourceCollectionManifest;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.inductiveautomation.ignition.gateway.localdb.persistence.PersistenceInterface;
 import com.inductiveautomation.ignition.gateway.project.ProjectManager;
@@ -50,9 +50,9 @@ public class GitCommissioningUtils {
                         gitConfig.loadFromProjectConfig(projectConfig);
 
                         config = gitConfig;
-                        if (projectManager.getProjectNames().contains(gitConfig.getIgnitionProjectName())) {
-                            logger.info("The configuration of the git module was interrupted because the project '" + config.getIgnitionProjectName() + "' already exist.");
-                            return;
+                        if (projectManager.getNames().contains(gitConfig.getIgnitionProjectName())) {
+                            logger.info("Skipping project '" + config.getIgnitionProjectName() + "' because it already exists.");
+                            continue;
                         }
 
                         if (config.getRepoURI() == null || config.getRepoBranch() == null
@@ -62,7 +62,7 @@ public class GitCommissioningUtils {
                             throw new RuntimeException("Incomplete git configuration file.");
                         }
 
-                        projectManager.createProject(config.getIgnitionProjectName(), new ProjectManifest(config.getIgnitionProjectName(), "", false, config.isIgnitionProjectInheritable(), config.getIgnitionProjectParentName()), new ArrayList());
+                        projectManager.create(config.getIgnitionProjectName(), new ResourceCollectionManifest(config.getIgnitionProjectName(), "", false, config.isIgnitionProjectInheritable(), config.getIgnitionProjectParentName()), new ArrayList());
 
                         Path projectDir = getProjectFolderPath(config.getIgnitionProjectName());
                         clearDirectory(projectDir);
@@ -71,8 +71,8 @@ public class GitCommissioningUtils {
                         PersistenceInterface persistenceInterface = context.getPersistenceInterface();
                         SQuery<GitProjectsConfigRecord> query = new SQuery<>(GitProjectsConfigRecord.META).eq(GitProjectsConfigRecord.ProjectName, config.getIgnitionProjectName());
                         if (persistenceInterface.queryOne(query) != null) {
-                            logger.info("The configuration of the git module was interrupted because the GitProjectsConfigRecord '" + config.getIgnitionProjectName() + "' already exist.");
-                            return;
+                            logger.info("Skipping project '" + config.getIgnitionProjectName() + "' because GitProjectsConfigRecord already exists.");
+                            continue;
                         }
                         GitProjectsConfigRecord projectsConfigRecord = persistenceInterface.createNew(GitProjectsConfigRecord.META);
                         projectsConfigRecord.setProjectName(config.getIgnitionProjectName());

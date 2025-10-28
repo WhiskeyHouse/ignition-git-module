@@ -10,6 +10,26 @@ The Git module is an Ignition module embedding a Git client to make its integrat
 It permits to manage project resources throughout the development process in the Ignition designer. <br/>
 Exporting gateway configuration is simplified or even automated.
 
+## Version Compatibility
+
+| Module Version | Ignition Version | Status | Download |
+|---------------|------------------|---------|----------|
+| v1.x (≤1.0.3) | 8.1.x | ⚠️ End of Life | [v1.0.3-ignition-8.1](https://github.com/WhiskeyHouse/ignition-git-module/releases/tag/v1.0.3-ignition-8.1) |
+| v2.x (≥2.0.0) | 8.3.1+ | ✅ Active Development | Build from source |
+
+### ⚠️ Breaking Changes in v2.0.0
+
+**Version 2.0.0 and higher require Ignition 8.3.1 or later** and are NOT backwards compatible with 8.1.x.
+
+**Major Changes:**
+- Migrated from Java serialization to **Protobuf RPC** for improved performance and security
+- Updated to Ignition 8.3 **React-based web framework** for Gateway configuration pages
+- Changed RPC method signatures (Dataset → strongly-typed DTOs for better serialization)
+- New module hook patterns following Ignition 8.3 standards
+- Requires **Java 17+** (Ignition 8.3 requirement)
+
+**If you're using Ignition 8.1.x**, please use the [v1.0.3-ignition-8.1 release](https://github.com/WhiskeyHouse/ignition-git-module/releases/tag/v1.0.3-ignition-8.1).
+
 ## Features
 
 - Link an Ignition project with a remote repo, (Gateway Webpage)
@@ -35,7 +55,7 @@ You will also find a download link to the signed version of the module.
 
 Before installing and running this project on your local machine, make sure you have installed the following :
 
-- Java (JDK >= 11)
+- Java (JDK >= 17) - Required for Ignition 8.3+ compatibility
 - Maven
 - Java IDE (I recommend [Intellij](https://www.jetbrains.com/idea/download/))
 

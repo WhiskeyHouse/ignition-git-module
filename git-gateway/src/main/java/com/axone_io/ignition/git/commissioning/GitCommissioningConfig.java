@@ -76,7 +76,7 @@ public class GitCommissioningConfig {
 
     public void setSecretFromFilePath(Path filePath, boolean isSSHAuth) throws IOException {
         if (filePath.toFile().exists() && filePath.toFile().isFile()) {
-            String secret = Files.readString(filePath, StandardCharsets.UTF_8);
+            String secret = Files.readString(filePath, StandardCharsets.UTF_8).trim();
             if (isSSHAuth) {
                 this.sshKey = secret;
             } else {

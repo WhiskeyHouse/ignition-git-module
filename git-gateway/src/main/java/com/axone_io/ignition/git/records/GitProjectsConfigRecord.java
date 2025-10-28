@@ -1,6 +1,7 @@
 package com.axone_io.ignition.git.records;
 
-import com.axone_io.ignition.git.web.ProjectList.ProjectListEditorSource;
+// Disabled for 8.3 upgrade - web UI form editors
+// import com.axone_io.ignition.git.web.ProjectList.ProjectListEditorSource;
 import com.inductiveautomation.ignition.gateway.localdb.persistence.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,8 +23,8 @@ public class GitProjectsConfigRecord extends PersistentRecord {
     public static final StringField URI =
             new StringField(META, "URI", SFieldFlags.SMANDATORY, SFieldFlags.SDESCRIPTIVE);
 
-
-    static final Category ProjectConfiguration = new Category("GitProjectsConfigRecord.Category.ProjectConfiguration", 1000).include(ProjectName, URI);
+    // Category removed in 8.3 - was only used for Wicket form grouping
+    // static final Category ProjectConfiguration = new Category("GitProjectsConfigRecord.Category.ProjectConfiguration", 1000).include(ProjectName, URI);
 
 
     public long getId() {
@@ -50,6 +51,9 @@ public class GitProjectsConfigRecord extends PersistentRecord {
         return !this.getString(URI).toLowerCase().startsWith("http");
     }
 
+    // DISABLED FOR 8.3 UPGRADE - Web UI form metadata not needed without config pages
+    // TODO: Re-enable when migrating to new 8.3 web API
+    /*
     static {
         ProjectName.getFormMeta().setEditorSource(ProjectListEditorSource.getSharedInstance());
 
@@ -59,4 +63,5 @@ public class GitProjectsConfigRecord extends PersistentRecord {
         URI.setWide();
 
     }
+    */
 }

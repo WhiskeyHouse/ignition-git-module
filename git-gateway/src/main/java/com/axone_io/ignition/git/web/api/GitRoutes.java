@@ -1,0 +1,476 @@
+package com.axone_io.ignition.git.web.api;
+
+import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
+import com.axone_io.ignition.git.records.GitReposUsersRecord;
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import com.inductiveautomation.ignition.gateway.dataroutes.AccessControlStrategy;
+import com.inductiveautomation.ignition.gateway.dataroutes.HttpMethod;
+import com.inductiveautomation.ignition.gateway.dataroutes.RequestContext;
+import com.inductiveautomation.ignition.gateway.dataroutes.RouteGroup;
+import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import simpleorm.dataset.SQuery;
+
+import java.io.BufferedReader;
+import java.util.List;
+import java.util.stream.Collectors;
+
+/**
+ * Route handlers for Git configuration API endpoints
+ */
+public class GitRoutes {
+    private static final Logger logger = LoggerFactory.getLogger(GitRoutes.class);
+    private static final Gson gson = new Gson();
+
+    public static void mountRoutes(RouteGroup routes) {
+        logger.info("GitRoutes.mountRoutes called - starting to mount routes");
+        logger.info("RouteGroup instance: " + routes.getClass().getName());
+
+        // Projects routes
+        try {
+            logger.info("Mounting route: /projects (GET)");
+            routes.newRoute("/projects")
+                .type(RouteGroup.TYPE_JSON)
+                .handler(GitRoutes::getProjects)
+                .accessControl(AccessControlStrategy.OPEN_ROUTE)
+                .mount();
+            logger.info("Successfully mounted route: /projects (GET)");
+        } catch (Exception e) {
+            logger.error("Failed to mount route /projects (GET)", e);
+            throw e;
+        }
+
+        routes.newRoute("/projects/:id")
+            .type(RouteGroup.TYPE_JSON)
+            .handler(GitRoutes::getProject)
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .mount();
+
+        routes.newRoute("/projects")
+            .type(RouteGroup.TYPE_JSON)
+            .method(HttpMethod.POST)
+            .handler(GitRoutes::createProject)
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .mount();
+
+        routes.newRoute("/projects/:id")
+            .type(RouteGroup.TYPE_JSON)
+            .method(HttpMethod.PUT)
+            .handler(GitRoutes::updateProject)
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .mount();
+
+        routes.newRoute("/projects/:id")
+            .type(RouteGroup.TYPE_JSON)
+            .method(HttpMethod.DELETE)
+            .handler(GitRoutes::deleteProject)
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .mount();
+
+        // Users routes
+        routes.newRoute("/users")
+            .type(RouteGroup.TYPE_JSON)
+            .handler(GitRoutes::getUsers)
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .mount();
+
+        routes.newRoute("/users")
+            .type(RouteGroup.TYPE_JSON)
+            .method(HttpMethod.POST)
+            .handler(GitRoutes::createUser)
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .mount();
+
+        routes.newRoute("/users/:id")
+            .type(RouteGroup.TYPE_JSON)
+            .method(HttpMethod.PUT)
+            .handler(GitRoutes::updateUser)
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .mount();
+
+        routes.newRoute("/users/:id")
+            .type(RouteGroup.TYPE_JSON)
+            .method(HttpMethod.DELETE)
+            .handler(GitRoutes::deleteUser)
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .mount();
+
+        // Add a test route to verify routing is working
+        routes.newRoute("/test")
+            .type(RouteGroup.TYPE_PLAIN_TEXT)
+            .handler((req, res) -> "Git module routes are working!")
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .mount();
+        logger.info("Mounted test route: /test");
+
+        logger.info("GitRoutes.mountRoutes completed - all routes mounted successfully");
+    }
+
+    // Project handlers
+    private static Object getProjects(RequestContext req, HttpServletResponse res) {
+        try {
+            List<GitProjectsConfigRecord> projects = req.getGatewayContext()
+                    .getPersistenceInterface()
+                    .query(new SQuery<>(GitProjectsConfigRecord.META));
+
+            return projects.stream()
+                    .map(p -> {
+                        JsonObject obj = new JsonObject();
+                        obj.addProperty("id", p.getId());
+                        obj.addProperty("projectName", p.getProjectName());
+                        obj.addProperty("uri", p.getURI());
+                        return obj;
+                    })
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            logger.error("Error fetching projects", e);
+            res.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            JsonObject error = new JsonObject();
+            error.addProperty("error", e.getMessage());
+            return error;
+        }
+    }
+
+    private static Object getProject(RequestContext req, HttpServletResponse res) {
+        try {
+            long id = Long.parseLong(req.getParameter("id"));
+            GitProjectsConfigRecord project = req.getGatewayContext()
+                    .getPersistenceInterface()
+                    .find(GitProjectsConfigRecord.META, id);
+
+            if (project == null) {
+                res.setStatus(HttpServletResponse.SC_NOT_FOUND);
+                JsonObject error = new JsonObject();
+                error.addProperty("error", "Project not found");
+                return error;
+            }
+
+            JsonObject obj = new JsonObject();
+            obj.addProperty("id", project.getId());
+            obj.addProperty("projectName", project.getProjectName());
+            obj.addProperty("uri", project.getURI());
+            return obj;
+        } catch (Exception e) {
+            logger.error("Error fetching project", e);
+            res.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            JsonObject error = new JsonObject();
+            error.addProperty("error", e.getMessage());
+            return error;
+        }
+    }
+
+    private static Object createProject(RequestContext req, HttpServletResponse res) {
+        try {
+            BufferedReader reader = req.getRequest().getReader();
+            JsonObject body = gson.fromJson(reader, JsonObject.class);
+
+            GitProjectsConfigRecord record = req.getGatewayContext()
+                    .getPersistenceInterface()
+                    .createNew(GitProjectsConfigRecord.META);
+
+            record.setProjectName(body.get("projectName").getAsString());
+            record.setURI(body.get("uri").getAsString());
+
+            req.getGatewayContext().getPersistenceInterface().save(record);
+
+            res.setStatus(HttpServletResponse.SC_CREATED);
+            JsonObject response = new JsonObject();
+            response.addProperty("id", record.getId());
+            response.addProperty("projectName", record.getProjectName());
+            response.addProperty("uri", record.getURI());
+            return response;
+        } catch (Exception e) {
+            logger.error("Error creating project", e);
+            res.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            JsonObject error = new JsonObject();
+            error.addProperty("error", e.getMessage());
+            return error;
+        }
+    }
+
+    private static Object updateProject(RequestContext req, HttpServletResponse res) {
+        try {
+            long id = Long.parseLong(req.getParameter("id"));
+            BufferedReader reader = req.getRequest().getReader();
+            JsonObject body = gson.fromJson(reader, JsonObject.class);
+
+            GitProjectsConfigRecord record = req.getGatewayContext()
+                    .getPersistenceInterface()
+                    .find(GitProjectsConfigRecord.META, id);
+
+            if (record == null) {
+                res.setStatus(HttpServletResponse.SC_NOT_FOUND);
+                JsonObject error = new JsonObject();
+                error.addProperty("error", "Project not found");
+                return error;
+            }
+
+            record.setProjectName(body.get("projectName").getAsString());
+            record.setURI(body.get("uri").getAsString());
+
+            req.getGatewayContext().getPersistenceInterface().save(record);
+
+            JsonObject response = new JsonObject();
+            response.addProperty("id", record.getId());
+            response.addProperty("projectName", record.getProjectName());
+            response.addProperty("uri", record.getURI());
+            return response;
+        } catch (Exception e) {
+            logger.error("Error updating project", e);
+            res.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            JsonObject error = new JsonObject();
+            error.addProperty("error", e.getMessage());
+            return error;
+        }
+    }
+
+    private static Object deleteProject(RequestContext req, HttpServletResponse res) {
+        try {
+            long id = Long.parseLong(req.getParameter("id"));
+            GitProjectsConfigRecord record = req.getGatewayContext()
+                    .getPersistenceInterface()
+                    .find(GitProjectsConfigRecord.META, id);
+
+            if (record == null) {
+                res.setStatus(HttpServletResponse.SC_NOT_FOUND);
+                JsonObject error = new JsonObject();
+                error.addProperty("error", "Project not found");
+                return error;
+            }
+
+            record.deleteRecord();
+            req.getGatewayContext().getPersistenceInterface().save(record);
+
+            res.setStatus(HttpServletResponse.SC_NO_CONTENT);
+            return null;
+        } catch (Exception e) {
+            logger.error("Error deleting project", e);
+            res.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            JsonObject error = new JsonObject();
+            error.addProperty("error", e.getMessage());
+            return error;
+        }
+    }
+
+    // User handlers
+    private static Object getUsers(RequestContext req, HttpServletResponse res) {
+        try {
+            List<GitReposUsersRecord> users = req.getGatewayContext()
+                    .getPersistenceInterface()
+                    .query(new SQuery<>(GitReposUsersRecord.META));
+
+            logger.info("Found {} users in database", users.size());
+
+            // Build project name lookup map
+            List<GitProjectsConfigRecord> projects = req.getGatewayContext()
+                    .getPersistenceInterface()
+                    .query(new SQuery<>(GitProjectsConfigRecord.META));
+
+            java.util.Map<Long, String> projectNames = projects.stream()
+                    .collect(Collectors.toMap(
+                            GitProjectsConfigRecord::getId,
+                            GitProjectsConfigRecord::getProjectName
+                    ));
+
+            logger.info("Found {} projects in database", projectNames.size());
+
+            return users.stream()
+                    .map(u -> {
+                        JsonObject obj = new JsonObject();
+                        obj.addProperty("id", u.getId());
+
+                        // Resolve project name from projectId
+                        String projectName = projectNames.get((long) u.getProjectId());
+                        if (projectName == null) {
+                            logger.warn("Project name not found for user id={}, projectId={}",
+                                    u.getId(), u.getProjectId());
+                            projectName = "";
+                        }
+                        obj.addProperty("projectName", projectName);
+
+                        obj.addProperty("ignitionUser", u.getIgnitionUser() != null ? u.getIgnitionUser() : "");
+                        obj.addProperty("userName", u.getUserName() != null ? u.getUserName() : "");
+                        obj.addProperty("email", u.getEmail() != null ? u.getEmail() : "");
+                        obj.addProperty("password", u.getPassword() != null ? u.getPassword() : "");
+                        obj.addProperty("sshKey", u.getSSHKey() != null ? u.getSSHKey() : "");
+
+                        return obj;
+                    })
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            logger.error("Error fetching users", e);
+            res.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            JsonObject error = new JsonObject();
+            error.addProperty("error", e.getMessage());
+            return error;
+        }
+    }
+
+    private static Object createUser(RequestContext req, HttpServletResponse res) {
+        try {
+            BufferedReader reader = req.getRequest().getReader();
+            JsonObject body = gson.fromJson(reader, JsonObject.class);
+
+            // Find project by name
+            String projectName = body.get("projectName").getAsString();
+            SQuery<GitProjectsConfigRecord> projectQuery = new SQuery<>(GitProjectsConfigRecord.META)
+                    .eq(GitProjectsConfigRecord.ProjectName, projectName);
+            GitProjectsConfigRecord project = req.getGatewayContext()
+                    .getPersistenceInterface()
+                    .queryOne(projectQuery);
+
+            if (project == null) {
+                res.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+                JsonObject error = new JsonObject();
+                error.addProperty("error", "Project not found: " + projectName);
+                return error;
+            }
+
+            // Create new user record
+            GitReposUsersRecord record = req.getGatewayContext()
+                    .getPersistenceInterface()
+                    .createNew(GitReposUsersRecord.META);
+
+            record.setProjectId(project.getId());
+            record.setIgnitionUser(body.get("ignitionUser").getAsString());
+            record.setUserName(body.has("userName") ? body.get("userName").getAsString() : "");
+            record.setEmail(body.get("email").getAsString());
+            record.setPassword(body.has("password") ? body.get("password").getAsString() : "");
+            record.setSSHKey(body.has("sshKey") ? body.get("sshKey").getAsString() : "");
+
+            req.getGatewayContext().getPersistenceInterface().save(record);
+
+            res.setStatus(HttpServletResponse.SC_CREATED);
+            JsonObject response = new JsonObject();
+            response.addProperty("id", record.getId());
+            response.addProperty("projectName", project.getProjectName());
+            response.addProperty("ignitionUser", record.getIgnitionUser());
+            response.addProperty("userName", record.getUserName());
+            response.addProperty("email", record.getEmail());
+            response.addProperty("password", record.getPassword());
+            response.addProperty("sshKey", record.getSSHKey());
+            return response;
+        } catch (Exception e) {
+            logger.error("Error creating user", e);
+            res.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            JsonObject error = new JsonObject();
+            error.addProperty("error", e.getMessage());
+            return error;
+        }
+    }
+
+    private static Object updateUser(RequestContext req, HttpServletResponse res) {
+        try {
+            long id = Long.parseLong(req.getParameter("id"));
+            BufferedReader reader = req.getRequest().getReader();
+            JsonObject body = gson.fromJson(reader, JsonObject.class);
+
+            // Use query instead of find since there's a composite primary key
+            SQuery<GitReposUsersRecord> query = new SQuery<>(GitReposUsersRecord.META)
+                    .eq(GitReposUsersRecord.Id, id);
+            GitReposUsersRecord record = req.getGatewayContext()
+                    .getPersistenceInterface()
+                    .queryOne(query);
+
+            if (record == null) {
+                res.setStatus(HttpServletResponse.SC_NOT_FOUND);
+                JsonObject error = new JsonObject();
+                error.addProperty("error", "User not found");
+                return error;
+            }
+
+            // Update project if provided
+            if (body.has("projectName")) {
+                String projectName = body.get("projectName").getAsString();
+                SQuery<GitProjectsConfigRecord> projectQuery = new SQuery<>(GitProjectsConfigRecord.META)
+                        .eq(GitProjectsConfigRecord.ProjectName, projectName);
+                GitProjectsConfigRecord project = req.getGatewayContext()
+                        .getPersistenceInterface()
+                        .queryOne(projectQuery);
+
+                if (project == null) {
+                    res.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+                    JsonObject error = new JsonObject();
+                    error.addProperty("error", "Project not found: " + projectName);
+                    return error;
+                }
+                record.setProjectId(project.getId());
+            }
+
+            // Update other fields
+            if (body.has("ignitionUser")) {
+                record.setIgnitionUser(body.get("ignitionUser").getAsString());
+            }
+            if (body.has("userName")) {
+                record.setUserName(body.get("userName").getAsString());
+            }
+            if (body.has("email")) {
+                record.setEmail(body.get("email").getAsString());
+            }
+            if (body.has("password") && !body.get("password").getAsString().isEmpty()) {
+                record.setPassword(body.get("password").getAsString());
+            }
+            if (body.has("sshKey") && !body.get("sshKey").getAsString().isEmpty()) {
+                record.setSSHKey(body.get("sshKey").getAsString());
+            }
+
+            req.getGatewayContext().getPersistenceInterface().save(record);
+
+            // Get project name for response
+            GitProjectsConfigRecord project = req.getGatewayContext()
+                    .getPersistenceInterface()
+                    .find(GitProjectsConfigRecord.META, (long) record.getProjectId());
+
+            res.setStatus(HttpServletResponse.SC_OK);
+            JsonObject response = new JsonObject();
+            response.addProperty("id", record.getId());
+            response.addProperty("projectName", project != null ? project.getProjectName() : "");
+            response.addProperty("ignitionUser", record.getIgnitionUser());
+            response.addProperty("userName", record.getUserName());
+            response.addProperty("email", record.getEmail());
+            response.addProperty("password", record.getPassword());
+            response.addProperty("sshKey", record.getSSHKey());
+            return response;
+        } catch (Exception e) {
+            logger.error("Error updating user", e);
+            res.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            JsonObject error = new JsonObject();
+            error.addProperty("error", e.getMessage());
+            return error;
+        }
+    }
+
+    private static Object deleteUser(RequestContext req, HttpServletResponse res) {
+        try {
+            long id = Long.parseLong(req.getParameter("id"));
+
+            // Use query instead of find since there's a composite primary key
+            SQuery<GitReposUsersRecord> query = new SQuery<>(GitReposUsersRecord.META)
+                    .eq(GitReposUsersRecord.Id, id);
+            GitReposUsersRecord record = req.getGatewayContext()
+                    .getPersistenceInterface()
+                    .queryOne(query);
+
+            if (record == null) {
+                res.setStatus(HttpServletResponse.SC_NOT_FOUND);
+                JsonObject error = new JsonObject();
+                error.addProperty("error", "User not found");
+                return error;
+            }
+
+            record.deleteRecord();
+            req.getGatewayContext().getPersistenceInterface().save(record);
+
+            res.setStatus(HttpServletResponse.SC_NO_CONTENT);
+            return null;
+        } catch (Exception e) {
+            logger.error("Error deleting user", e);
+            res.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            JsonObject error = new JsonObject();
+            error.addProperty("error", e.getMessage());
+            return error;
+        }
+    }
+}

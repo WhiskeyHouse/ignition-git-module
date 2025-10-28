@@ -1,9 +1,8 @@
 package com.axone_io.ignition.git.records;
 
 import com.inductiveautomation.ignition.gateway.localdb.persistence.*;
-import com.inductiveautomation.ignition.gateway.web.components.editors.PasswordEditorSource;
-import com.inductiveautomation.ignition.gateway.web.components.editors.TextAreaEditorSource;
-import org.apache.wicket.validation.validator.EmailAddressValidator;
+// TODO: Re-enable SecretConfig when implementing proper Secrets management
+// import com.inductiveautomation.ignition.gateway.secrets.SecretConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import simpleorm.dataset.SFieldFlags;
@@ -28,9 +27,12 @@ public class GitReposUsersRecord extends PersistentRecord {
     public static final StringField SSHKey = new StringField(META, "SSHKey");
     public static final StringField UserName = new StringField(META, "UserName");
     public static final StringField Email = new StringField(META, "Email", SFieldFlags.SMANDATORY, SFieldFlags.SDESCRIPTIVE).setDefault("");
-    public static final EncodedStringField Password = new EncodedStringField(META, "Password");
+    // TODO: Migrate to SecretConfig for proper secrets management in 8.3
+    // For now using StringField to get compilation working
+    public static final StringField Password = new StringField(META, "Password");
 
-    static final Category UserProperties = new Category("GitReposUsersRecord.Category.UserProperties", 1000).include(ProjectName, IgnitionUser, UserName, Email, SSHKey, Password);
+    // Category removed in 8.3 - was only used for Wicket form grouping
+    // static final Category UserProperties = new Category("GitReposUsersRecord.Category.UserProperties", 1000).include(ProjectName, IgnitionUser, UserName, Email, SSHKey, Password);
 
     public int getId() {
         return this.getInt(Id);
@@ -88,6 +90,9 @@ public class GitReposUsersRecord extends PersistentRecord {
         this.setLong(ProjectId, projectId);
     }
 
+    // DISABLED FOR 8.3 UPGRADE - Web UI form metadata not needed without config pages
+    // TODO: Re-enable when migrating to new 8.3 web API
+    /*
     static {
         ProjectName.getFormMeta().setEnabled(false);
         URI.getFormMeta().setVisible(false);
@@ -120,5 +125,6 @@ public class GitReposUsersRecord extends PersistentRecord {
         Password.getFormMeta().setFieldDescriptionKeyEditMode("GitReposUsersRecord.Password.EditDesc");
         Password.getFormMeta().setEditorSource(PasswordEditorSource.getSharedInstance());
     }
+    */
 }
 
