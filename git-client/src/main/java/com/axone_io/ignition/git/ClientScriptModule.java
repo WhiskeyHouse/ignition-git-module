@@ -55,4 +55,29 @@ public class ClientScriptModule extends AbstractScriptModule {
     protected List<CommitInfo> getCommitHistoryImpl(String projectName, String userName, int maxCount) {
         return rpc.getCommitHistory(projectName, userName, maxCount);
     }
+
+    @Override
+    protected List<BranchInfo> listBranchesImpl(String projectName, String userName) throws Exception {
+        return rpc.listBranches(projectName, userName);
+    }
+
+    @Override
+    protected boolean fetchFromRemoteImpl(String projectName, String userName) throws Exception {
+        return rpc.fetchFromRemote(projectName, userName);
+    }
+
+    @Override
+    protected String getCurrentBranchImpl(String projectName) throws Exception {
+        return rpc.getCurrentBranch(projectName);
+    }
+
+    @Override
+    protected BranchStatus getBranchStatusImpl(String projectName, String userName) throws Exception {
+        return rpc.getBranchStatus(projectName, userName);
+    }
+
+    @Override
+    protected boolean switchBranchImpl(String projectName, String userName, String branchName, boolean createNew) throws Exception {
+        return rpc.switchBranch(projectName, userName, branchName, createNew);
+    }
 }

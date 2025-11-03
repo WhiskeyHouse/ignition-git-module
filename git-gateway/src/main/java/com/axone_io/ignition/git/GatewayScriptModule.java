@@ -12,9 +12,7 @@ import org.eclipse.jgit.api.*;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.diff.DiffFormatter;
-import org.eclipse.jgit.lib.ObjectReader;
-import org.eclipse.jgit.lib.Ref;
-import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.lib.*;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevTree;
 import org.eclipse.jgit.revwalk.RevWalk;
@@ -340,5 +338,200 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     private Path getProjectFolderPath(String projectName) {
         Path dataDir = context.getSystemManager().getDataDir().toPath();
         return dataDir.resolve("projects").resolve(projectName);
+    }
+
+    @Override
+    protected List<BranchInfo> listBranchesImpl(String projectName, String userName) throws Exception {
+        List<BranchInfo> branches = new ArrayList<>();
+
+        try (Git git = getGit(getProjectFolderPath(projectName))) {
+            Repository repository = git.getRepository();
+            String currentBranchName = repository.getBranch();
+
+            // List all branches (local and remote)
+            List<Ref> allBranches = git.branchList()
+                    .setListMode(ListBranchCommand.ListMode.ALL)
+                    .call();
+
+            for (Ref ref : allBranches) {
+                String fullName = ref.getName();
+                String branchName;
+                boolean isLocal = fullName.startsWith(Constants.R_HEADS);
+                boolean isRemote = fullName.startsWith(Constants.R_REMOTES);
+
+                if (isLocal) {
+                    branchName = fullName.substring(Constants.R_HEADS.length());
+                } else if (isRemote) {
+                    branchName = fullName.substring(Constants.R_REMOTES.length());
+                } else {
+                    continue; // Skip tags and other refs
+                }
+
+                boolean isCurrent = isLocal && branchName.equals(currentBranchName);
+
+                // Calculate ahead/behind counts for local branches with tracking
+                int commitsAhead = 0;
+                int commitsBehind = 0;
+
+                if (isLocal) {
+                    try {
+                        BranchTrackingStatus trackingStatus = BranchTrackingStatus.of(repository, branchName);
+                        if (trackingStatus != null) {
+                            commitsAhead = trackingStatus.getAheadCount();
+                            commitsBehind = trackingStatus.getBehindCount();
+                        }
+                    } catch (Exception e) {
+                        logger.debug("Could not get tracking status for branch: " + branchName, e);
+                    }
+                }
+
+                BranchInfo branchInfo = new BranchInfo(
+                        branchName,
+                        isLocal,
+                        isRemote,
+                        isCurrent,
+                        commitsAhead,
+                        commitsBehind,
+                        fullName
+                );
+                branches.add(branchInfo);
+            }
+
+        } catch (Exception e) {
+            logger.error("Error listing branches for project: " + projectName, e);
+            throw new Exception("Failed to list branches: " + e.getMessage(), e);
+        }
+
+        return branches;
+    }
+
+    @Override
+    protected boolean fetchFromRemoteImpl(String projectName, String userName) throws Exception {
+        try (Git git = getGit(getProjectFolderPath(projectName))) {
+            FetchCommand fetch = git.fetch().setRemote("origin");
+            setAuthentication(fetch, projectName, userName);
+
+            fetch.call();
+            logger.info("Successfully fetched branches from remote for project: " + projectName);
+            return true;
+
+        } catch (Exception e) {
+            logger.error("Error fetching from remote for project: " + projectName, e);
+            throw new Exception("Failed to fetch from remote: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    protected String getCurrentBranchImpl(String projectName) throws Exception {
+        try (Git git = getGit(getProjectFolderPath(projectName))) {
+            String branchName = git.getRepository().getBranch();
+            logger.debug("Current branch for project " + projectName + ": " + branchName);
+            return branchName;
+
+        } catch (Exception e) {
+            logger.error("Error getting current branch for project: " + projectName, e);
+            throw new Exception("Failed to get current branch: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    protected BranchStatus getBranchStatusImpl(String projectName, String userName) throws Exception {
+        try (Git git = getGit(getProjectFolderPath(projectName))) {
+            Repository repository = git.getRepository();
+            String currentBranch = repository.getBranch();
+
+            // Check for uncommitted changes
+            Status status = git.status().call();
+
+            List<String> uncommittedFiles = new ArrayList<>();
+            uncommittedFiles.addAll(status.getModified());
+            uncommittedFiles.addAll(status.getChanged());
+            uncommittedFiles.addAll(status.getMissing());
+
+            List<String> untrackedFiles = new ArrayList<>(status.getUntracked());
+
+            boolean hasUncommittedChanges = !uncommittedFiles.isEmpty() || !untrackedFiles.isEmpty();
+
+            // Calculate unpushed commits
+            int unpushedCommits = 0;
+            try {
+                BranchTrackingStatus trackingStatus = BranchTrackingStatus.of(repository, currentBranch);
+                if (trackingStatus != null) {
+                    unpushedCommits = trackingStatus.getAheadCount();
+                }
+            } catch (Exception e) {
+                logger.debug("Could not get tracking status for current branch: " + currentBranch, e);
+            }
+
+            BranchStatus branchStatus = new BranchStatus(
+                    hasUncommittedChanges,
+                    unpushedCommits,
+                    uncommittedFiles,
+                    untrackedFiles,
+                    currentBranch
+            );
+
+            logger.debug("Branch status for project " + projectName + ": " + branchStatus);
+            return branchStatus;
+
+        } catch (Exception e) {
+            logger.error("Error getting branch status for project: " + projectName, e);
+            throw new Exception("Failed to get branch status: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    protected boolean switchBranchImpl(String projectName, String userName, String branchName, boolean createNew) throws Exception {
+        try (Git git = getGit(getProjectFolderPath(projectName))) {
+            CheckoutCommand checkout = git.checkout();
+
+            if (createNew) {
+                // Create new branch from current HEAD
+                checkout.setCreateBranch(true)
+                        .setName(branchName);
+                logger.info("Creating and switching to new branch: " + branchName);
+
+            } else {
+                // Check if branch exists locally
+                List<Ref> localBranches = git.branchList().call();
+                boolean existsLocally = localBranches.stream()
+                        .anyMatch(ref -> ref.getName().equals(Constants.R_HEADS + branchName));
+
+                if (existsLocally) {
+                    // Switch to existing local branch
+                    checkout.setName(branchName);
+                    logger.info("Switching to existing local branch: " + branchName);
+
+                } else {
+                    // Check if it exists as a remote branch
+                    List<Ref> remoteBranches = git.branchList()
+                            .setListMode(ListBranchCommand.ListMode.REMOTE)
+                            .call();
+
+                    boolean existsRemotely = remoteBranches.stream()
+                            .anyMatch(ref -> ref.getName().equals(Constants.R_REMOTES + "origin/" + branchName));
+
+                    if (existsRemotely) {
+                        // Create local tracking branch from remote
+                        checkout.setCreateBranch(true)
+                                .setName(branchName)
+                                .setUpstreamMode(CreateBranchCommand.SetupUpstreamMode.TRACK)
+                                .setStartPoint("origin/" + branchName);
+                        logger.info("Creating local tracking branch from remote: " + branchName);
+
+                    } else {
+                        throw new Exception("Branch '" + branchName + "' does not exist locally or remotely.");
+                    }
+                }
+            }
+
+            checkout.call();
+            logger.info("Successfully switched to branch: " + branchName);
+            return true;
+
+        } catch (Exception e) {
+            logger.error("Error switching branch for project: " + projectName, e);
+            throw new Exception("Failed to switch branch: " + e.getMessage(), e);
+        }
     }
 }

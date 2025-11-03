@@ -16,6 +16,7 @@ import static com.axone_io.ignition.git.DesignerHook.*;
 import static com.axone_io.ignition.git.managers.GitActionManager.showCommitPopup;
 import static com.axone_io.ignition.git.managers.GitActionManager.showPullPopup;
 import static com.axone_io.ignition.git.managers.GitActionManager.showHistoryViewer;
+import static com.axone_io.ignition.git.managers.GitActionManager.showBranchPopup;
 import static com.axone_io.ignition.git.managers.GitActionManager.showConfirmPopup;
 import static com.axone_io.ignition.git.managers.GitActionManager.openRepositoryLink;
 
@@ -48,6 +49,11 @@ public class GitBaseAction extends BaseAction {
         HISTORY(
             "DesignerHook.Actions.History",
             "/com/axone_io/ignition/git/icons/ic_history.svg"
+        ),
+
+        BRANCH(
+            "DesignerHook.Actions.Branch",
+            "/com/axone_io/ignition/git/icons/ic_branch.svg"
         );
 
         private final String baseBundleKey;
@@ -127,6 +133,10 @@ public class GitBaseAction extends BaseAction {
                 case HISTORY:
                     confirmPopup = Boolean.FALSE;
                     showHistoryViewer(projectName, userName);
+                    break;
+                case BRANCH:
+                    confirmPopup = Boolean.FALSE;
+                    showBranchPopup(projectName, userName);
                     break;
             }
             if(confirmPopup) SwingUtilities.invokeLater(new Thread(() -> showConfirmPopup(message, messageType)));
