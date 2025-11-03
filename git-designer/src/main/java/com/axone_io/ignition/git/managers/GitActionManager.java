@@ -1,6 +1,8 @@
 package com.axone_io.ignition.git.managers;
 
 import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
+import com.axone_io.ignition.git.CommitHistoryViewer;
+import com.axone_io.ignition.git.CommitInfo;
 import com.axone_io.ignition.git.CommitPopup;
 import com.axone_io.ignition.git.DesignerHook;
 import com.axone_io.ignition.git.PullPopup;
@@ -118,5 +120,17 @@ public class GitActionManager {
     public static void showConfirmPopup(String message, int messageType) {
         JOptionPane.showConfirmDialog(context.getFrame(),
                 message, "Info", JOptionPane.DEFAULT_OPTION, messageType);
+    }
+
+    public static void showHistoryViewer(String projectName, String userName) {
+        try {
+            List<CommitInfo> commits = rpc.getCommitHistory(projectName, userName, 100);
+            new CommitHistoryViewer(commits, context.getFrame());
+        } catch (Exception e) {
+            logger.error("Error loading commit history", e);
+            JOptionPane.showMessageDialog(context.getFrame(),
+                    "Failed to load commit history: " + e.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
+        }
     }
 }

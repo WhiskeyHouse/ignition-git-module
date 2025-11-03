@@ -10,10 +10,20 @@ import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 import org.eclipse.jgit.api.*;
 import org.eclipse.jgit.api.errors.GitAPIException;
+import org.eclipse.jgit.diff.DiffEntry;
+import org.eclipse.jgit.diff.DiffFormatter;
+import org.eclipse.jgit.lib.ObjectReader;
 import org.eclipse.jgit.lib.Ref;
+import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.revwalk.RevCommit;
+import org.eclipse.jgit.revwalk.RevTree;
+import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.URIish;
+import org.eclipse.jgit.treewalk.AbstractTreeIterator;
+import org.eclipse.jgit.treewalk.CanonicalTreeParser;
+import org.eclipse.jgit.util.io.DisabledOutputStream;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -260,6 +270,71 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             logger.error(e.toString());
             throw new RuntimeException(e);
         }
+    }
+
+    @Override
+    protected List<CommitInfo> getCommitHistoryImpl(String projectName, String userName, int maxCount) {
+        List<CommitInfo> commits = new ArrayList<>();
+
+        try (Git git = getGit(getProjectFolderPath(projectName))) {
+            Repository repository = git.getRepository();
+            Iterable<RevCommit> logs = git.log().setMaxCount(maxCount > 0 ? maxCount : 100).call();
+
+            for (RevCommit commit : logs) {
+                String commitHash = commit.getName();
+                String shortHash = commit.abbreviate(7).name();
+                String message = commit.getFullMessage();
+                String author = commit.getAuthorIdent().getName();
+                String authorEmail = commit.getAuthorIdent().getEmailAddress();
+                long timestamp = commit.getCommitTime() * 1000L; // Convert to milliseconds
+
+                // Get list of files changed in this commit
+                List<String> filesChanged = new ArrayList<>();
+
+                try {
+                    if (commit.getParentCount() > 0) {
+                        RevCommit parent = commit.getParent(0);
+
+                        try (DiffFormatter diffFormatter = new DiffFormatter(DisabledOutputStream.INSTANCE)) {
+                            diffFormatter.setRepository(repository);
+                            List<DiffEntry> diffs = diffFormatter.scan(parent.getTree(), commit.getTree());
+
+                            for (DiffEntry diff : diffs) {
+                                String path = diff.getChangeType() == DiffEntry.ChangeType.DELETE
+                                        ? diff.getOldPath()
+                                        : diff.getNewPath();
+                                filesChanged.add(path);
+                            }
+                        }
+                    } else {
+                        // First commit - all files are new
+                        try (RevWalk revWalk = new RevWalk(repository);
+                             org.eclipse.jgit.treewalk.TreeWalk treeWalk = new org.eclipse.jgit.treewalk.TreeWalk(repository)) {
+
+                            RevTree tree = commit.getTree();
+                            treeWalk.addTree(tree);
+                            treeWalk.setRecursive(true);
+
+                            while (treeWalk.next()) {
+                                filesChanged.add(treeWalk.getPathString());
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.debug("Could not get files changed for commit: " + shortHash, e);
+                }
+
+                CommitInfo commitInfo = new CommitInfo(
+                        commitHash, shortHash, message, author,
+                        authorEmail, timestamp, filesChanged
+                );
+                commits.add(commitInfo);
+            }
+        } catch (Exception e) {
+            logger.error("Error fetching commit history for project: " + projectName, e);
+        }
+
+        return commits;
     }
 
     private Path getProjectFolderPath(String projectName) {

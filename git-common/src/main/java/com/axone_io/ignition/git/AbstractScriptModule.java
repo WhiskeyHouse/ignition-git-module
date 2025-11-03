@@ -60,6 +60,13 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
         setupLocalRepoImpl(projectName, userName);
     }
 
+    @Override
+    public List<CommitInfo> getCommitHistory(String projectName,
+                                            String userName,
+                                            int maxCount) {
+        return getCommitHistoryImpl(projectName, userName, maxCount);
+    }
+
     protected abstract boolean pullImpl(String projectName, String userName, boolean importTags, boolean importTheme,
                                         boolean importImages) throws Exception;
     protected abstract boolean pushImpl(String projectName, String userName) throws Exception;
@@ -68,5 +75,6 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
     protected abstract boolean isRegisteredUserImpl(String projectName, String userName);
     protected abstract boolean exportConfigImpl(String projectName);
     protected abstract void setupLocalRepoImpl(String projectName, String userName) throws Exception;
+    protected abstract List<CommitInfo> getCommitHistoryImpl(String projectName, String userName, int maxCount);
 
 }
