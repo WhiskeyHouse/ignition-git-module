@@ -50,4 +50,9 @@ public class ClientScriptModule extends AbstractScriptModule {
     protected void setupLocalRepoImpl(String projectName, String userName) throws Exception {
         rpc.setupLocalRepo(projectName, userName);
     }
+
+    @Override
+    protected List<CommitInfo> getCommitHistoryImpl(String projectName, String userName, int maxCount) {
+        return rpc.getCommitHistory(projectName, userName, maxCount);
+    }
 }

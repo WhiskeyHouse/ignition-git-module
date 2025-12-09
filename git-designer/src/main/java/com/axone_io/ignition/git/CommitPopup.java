@@ -14,6 +14,7 @@ import javax.swing.border.TitledBorder;
 import javax.swing.plaf.FontUIResource;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableColumn;
+import javax.swing.table.TableRowSorter;
 import javax.swing.text.StyleContext;
 import java.awt.*;
 import java.io.IOException;
@@ -31,6 +32,9 @@ public class CommitPopup extends JFrame {
     private JButton cancelBtn;
     private JLabel changesLabel;
     private JTable changesTable;
+    private JTextField searchField;
+    private JLabel searchLabel;
+    private TableRowSorter<DefaultTableModel> rowSorter;
 
     public CommitPopup(Object[][] data, Component parent) {
         try {
@@ -49,13 +53,19 @@ public class CommitPopup extends JFrame {
         changesTable.setAutoResizeMode(JTable.AUTO_RESIZE_LAST_COLUMN);
         changesTable.getTableHeader().setReorderingAllowed(false);
 
+        // Add search field
+        setupSearchField();
+
         setData(data);
 
         commitBtn.addActionListener(e -> {
             List<String> changes = new ArrayList<>();
-            for (int i = 0; i < changesTable.getModel().getRowCount(); i++) {
-                if ((Boolean) changesTable.getValueAt(i, 0)) {
-                    changes.add((String) changesTable.getValueAt(i, 1));
+            DefaultTableModel model = (DefaultTableModel) changesTable.getModel();
+
+            // Iterate through the model (not the view) to get all checked items
+            for (int i = 0; i < model.getRowCount(); i++) {
+                if ((Boolean) model.getValueAt(i, 0)) {
+                    changes.add((String) model.getValueAt(i, 1));
                 }
             }
 
@@ -72,6 +82,29 @@ public class CommitPopup extends JFrame {
 
     public void resetMessage() {
         messageTextArea.setText("");
+    }
+
+    private void setupSearchField() {
+        // Create search components
+        searchLabel = new JLabel("Search:");
+        searchLabel.setFont(searchLabel.getFont().deriveFont(Font.BOLD));
+        searchField = new JTextField(20);
+        searchField.setToolTipText("Filter changes by resource name, type, or author");
+
+        // Add to panel - insert between row 0 (Changes label) and row 1 (table)
+        // We need to shift the existing components down
+        GridLayoutManager layout = (GridLayoutManager) panel.getLayout();
+
+        // Create a new panel for search
+        JPanel searchPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+        searchPanel.add(searchLabel);
+        searchPanel.add(searchField);
+
+        // Add to main panel at row 0, column 1 (next to Changes label)
+        panel.add(searchPanel, new GridConstraints(0, 1, 1, 1,
+            GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE,
+            GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW,
+            GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
     }
 
     public void setData(Object[][] data) {
@@ -98,6 +131,48 @@ public class CommitPopup extends JFrame {
 
         TableColumn tc = changesTable.getColumnModel().getColumn(0);
         tc.setHeaderRenderer(new SelectAllHeader(changesTable, 0));
+
+        // Setup row sorter for filtering
+        rowSorter = new TableRowSorter<>(model);
+        changesTable.setRowSorter(rowSorter);
+
+        // Add filter listener
+        setupFilterListener();
+    }
+
+    private void setupFilterListener() {
+        searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            @Override
+            public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                filterTable();
+            }
+
+            @Override
+            public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                filterTable();
+            }
+
+            @Override
+            public void changedUpdate(javax.swing.event.DocumentEvent e) {
+                filterTable();
+            }
+        });
+    }
+
+    private void filterTable() {
+        String searchText = searchField.getText().trim();
+        if (searchText.isEmpty()) {
+            rowSorter.setRowFilter(null);
+        } else {
+            // Filter on columns 1 (Resource Name), 2 (Type), and 3 (Author)
+            rowSorter.setRowFilter(RowFilter.orFilter(
+                List.of(
+                    RowFilter.regexFilter("(?i)" + searchText, 1),
+                    RowFilter.regexFilter("(?i)" + searchText, 2),
+                    RowFilter.regexFilter("(?i)" + searchText, 3)
+                )
+            ));
+        }
     }
 
 
