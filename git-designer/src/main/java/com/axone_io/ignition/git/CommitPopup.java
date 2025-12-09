@@ -22,6 +22,7 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 public class CommitPopup extends JFrame {
     private final Logger logger = LoggerFactory.getLogger(getClass());
@@ -62,10 +63,11 @@ public class CommitPopup extends JFrame {
             List<String> changes = new ArrayList<>();
             DefaultTableModel model = (DefaultTableModel) changesTable.getModel();
 
-            // Iterate through the model (not the view) to get all checked items
-            for (int i = 0; i < model.getRowCount(); i++) {
-                if ((Boolean) model.getValueAt(i, 0)) {
-                    changes.add((String) model.getValueAt(i, 1));
+            // Iterate through the view (visible rows only) to get checked items
+            for (int viewRow = 0; viewRow < changesTable.getRowCount(); viewRow++) {
+                int modelRow = changesTable.convertRowIndexToModel(viewRow);
+                if ((Boolean) model.getValueAt(modelRow, 0)) {
+                    changes.add((String) model.getValueAt(modelRow, 1));
                 }
             }
 
@@ -167,9 +169,9 @@ public class CommitPopup extends JFrame {
             // Filter on columns 1 (Resource Name), 2 (Type), and 3 (Author)
             rowSorter.setRowFilter(RowFilter.orFilter(
                 List.of(
-                    RowFilter.regexFilter("(?i)" + searchText, 1),
-                    RowFilter.regexFilter("(?i)" + searchText, 2),
-                    RowFilter.regexFilter("(?i)" + searchText, 3)
+                    RowFilter.regexFilter("(?i)" + Pattern.quote(searchText), 1),
+                    RowFilter.regexFilter("(?i)" + Pattern.quote(searchText), 2),
+                    RowFilter.regexFilter("(?i)" + Pattern.quote(searchText), 3)
                 )
             ));
         }

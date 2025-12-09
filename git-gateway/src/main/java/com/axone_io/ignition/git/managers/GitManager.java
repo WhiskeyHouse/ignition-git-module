@@ -198,10 +198,26 @@ public class GitManager {
 //        ProjectResource projectResource = project.getResource(getResourcePath(path)).get();
 //        return LastModification.of(projectResource).map(LastModification::getActor).orElse("unknown");
 //    }
+    /**
+     * Retrieves the actor (user) who last modified the specified resource.
+     *
+     * NOTE: In Ignition 8.3, the ProjectManager API changed significantly:
+     * - ProjectManager.getProject(String) method no longer exists
+     * - Resource.getAttributeNames() method is not available
+     * - Direct access to RuntimeProject and Resource metadata is not supported
+     *
+     * Due to these API changes, actor tracking is not currently supported in Ignition 8.3.
+     * This method returns "unknown" for all resources.
+     *
+     * @param projectName the name of the project containing the resource
+     * @param path the path to the resource within the project
+     * @return "unknown" - actor tracking not supported in Ignition 8.3
+     */
     public static String getActor(String projectName, String path) {
-        // TODO: Implement actor tracking for 8.3 using Resource attributes
-        // The LastModification API was removed in 8.3
-        // For now, return "unknown" - can be enhanced later using Resource.getAttribute()
+        // Actor tracking is not supported in Ignition 8.3 due to API changes
+        // The ProjectManager.getProject() method and Resource.getAttributeNames()
+        // method that were used for actor retrieval no longer exist
+        logger.trace(String.format("Actor tracking not supported in Ignition 8.3 for project '%s' path '%s'", projectName, path));
         return "unknown";
     }
 

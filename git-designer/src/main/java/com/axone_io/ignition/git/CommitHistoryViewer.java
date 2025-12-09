@@ -5,13 +5,10 @@ import com.inductiveautomation.ignition.designer.gui.CommonUI;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.imageio.ImageIO;
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableRowSorter;
 import java.awt.*;
-import java.io.IOException;
-import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -32,14 +29,16 @@ public class CommitHistoryViewer extends JFrame {
     public CommitHistoryViewer(List<CommitInfo> commits, Component parent) {
         this.allCommits = commits;
 
-        try {
-            InputStream historyIconStream = getClass().getResourceAsStream("/com/axone_io/ignition/git/icons/ic_history.svg");
-            if (historyIconStream != null) {
-                ImageIcon historyIcon = new ImageIcon(ImageIO.read(historyIconStream));
-                setIconImage(historyIcon.getImage());
+        // TODO: Review IconUtils.getIcon() implementation to ensure it supports SVG (or add SVG handling there) so SVG icons are correctly loaded
+        Icon historyIcon = IconUtils.getIcon("/com/axone_io/ignition/git/icons/ic_history.svg");
+        if (historyIcon != null && historyIcon instanceof ImageIcon) {
+            setIconImage(((ImageIcon) historyIcon).getImage());
+        } else {
+            if (historyIcon == null) {
+                logger.error("Failed to load history icon: IconUtils.getIcon() returned null for /com/axone_io/ignition/git/icons/ic_history.svg");
+            } else {
+                logger.error("Failed to load history icon: Icon is not an ImageIcon (type: {})", historyIcon.getClass().getName());
             }
-        } catch (IOException e) {
-            logger.trace(e.toString(), e);
         }
 
         setupUI();
@@ -119,7 +118,8 @@ public class CommitHistoryViewer extends JFrame {
             String shortHash = commit.getShortHash();
             String date = dateFormat.format(new Date(commit.getTimestamp()));
             String author = commit.getAuthor();
-            String message = commit.getMessage().split("\n")[0]; // First line only
+            String rawMessage = commit.getMessage();
+            String message = rawMessage != null ? rawMessage.split("\n")[0] : "";
 
             List<String> filesChanged = commit.getFilesChanged();
             String filesInfo = filesChanged != null ? filesChanged.size() + " file(s)" : "0 file(s)";

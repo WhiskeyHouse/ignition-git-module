@@ -33,10 +33,15 @@ export class GitProjectsConfig extends Component<{}, State> {
 
   async loadProjects() {
     try {
-      const response = await fetch('/data/git/projects');
+      const response = await fetch('/data/git/projects', {
+        credentials: 'same-origin',
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
       if (!response.ok) throw new Error('Failed to load projects');
       const projects = await response.json();
-      this.setState({ projects, loading: false });
+      this.setState({ projects, loading: false, error: null });
     } catch (error) {
       this.setState({
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -61,7 +66,11 @@ export class GitProjectsConfig extends Component<{}, State> {
 
     try {
       const response = await fetch(`/data/git/projects/${id}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        credentials: 'same-origin',
+        headers: {
+          'Accept': 'application/json'
+        }
       });
       if (!response.ok) throw new Error('Failed to delete project');
       await this.loadProjects();
@@ -80,7 +89,11 @@ export class GitProjectsConfig extends Component<{}, State> {
 
       const response = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify(editing)
       });
 

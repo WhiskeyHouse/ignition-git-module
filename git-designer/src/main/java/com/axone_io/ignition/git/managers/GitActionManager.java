@@ -1,6 +1,9 @@
 package com.axone_io.ignition.git.managers;
 
 import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
+import com.axone_io.ignition.git.BranchInfo;
+import com.axone_io.ignition.git.BranchPopup;
+import com.axone_io.ignition.git.BranchStatus;
 import com.axone_io.ignition.git.CommitHistoryViewer;
 import com.axone_io.ignition.git.CommitInfo;
 import com.axone_io.ignition.git.CommitPopup;
@@ -12,6 +15,7 @@ import com.inductiveautomation.ignition.common.resourcecollection.ResourceId;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 
 import javax.swing.*;
+import javax.swing.SwingWorker;
 import java.util.ArrayList;
 import java.util.List;
 import java.awt.Desktop;
@@ -35,6 +39,7 @@ public class GitActionManager {
 
     static CommitPopup commitPopup;
     static PullPopup pullPopup;
+    static BranchPopup branchPopup;
     private static final Logger logger = LoggerFactory.getLogger(GitActionManager.class);
 
 
@@ -70,6 +75,19 @@ public class GitActionManager {
             data[i] = row;
         }
 
+        return data;
+    }
+
+    private static Object[][] buildBranchTableData(List<BranchInfo> branches) {
+        Object[][] data = new Object[branches.size()][];
+        for (int i = 0; i < branches.size(); i++) {
+            BranchInfo branch = branches.get(i);
+            String currentMarker = branch.isCurrent() ? "★" : "";
+            String type = branch.isLocal() ? (branch.isRemote() ? "Local/Remote" : "Local") : "Remote";
+            String statusStr = branch.getStatusString();
+
+            data[i] = new Object[]{branch.getDisplayName(), currentMarker, type, statusStr};
+        }
         return data;
     }
 
@@ -123,14 +141,143 @@ public class GitActionManager {
     }
 
     public static void showHistoryViewer(String projectName, String userName) {
+        SwingWorker<List<CommitInfo>, Void> worker = new SwingWorker<List<CommitInfo>, Void>() {
+            @Override
+            protected List<CommitInfo> doInBackground() throws Exception {
+                return rpc.getCommitHistory(projectName, userName, 100);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    List<CommitInfo> commits = get();
+                    new CommitHistoryViewer(commits, context.getFrame());
+                } catch (Exception e) {
+                    logger.error("Error loading commit history", e);
+                    SwingUtilities.invokeLater(() -> {
+                        JOptionPane.showMessageDialog(context.getFrame(),
+                                "Failed to load commit history: " + e.getMessage(),
+                                "Error", JOptionPane.ERROR_MESSAGE);
+                    });
+                }
+            }
+        };
+        worker.execute();
+    }
+
+    public static void showBranchPopup(String projectName, String userName) {
         try {
-            List<CommitInfo> commits = rpc.getCommitHistory(projectName, userName, 100);
-            new CommitHistoryViewer(commits, context.getFrame());
+            // Fetch from remote first
+            logger.info("Fetching branches from remote...");
+            rpc.fetchFromRemote(projectName, userName);
+
+            // Get branch list and status
+            List<BranchInfo> branches = rpc.listBranches(projectName, userName);
+            BranchStatus status = rpc.getBranchStatus(projectName, userName);
+
+            Object[][] data = buildBranchTableData(branches);
+
+            if (branchPopup != null) {
+                branchPopup.updateData(data, status);
+                branchPopup.setVisible(true);
+                branchPopup.toFront();
+            } else {
+                branchPopup = new BranchPopup(data, status, context.getFrame()) {
+                    @Override
+                    public void onSwitchBranch(String branchName, boolean createNew) {
+                        handleBranchSwitch(projectName, userName, branchName, createNew);
+                    }
+
+                    @Override
+                    public void onRefresh() {
+                        handleBranchRefresh(projectName, userName);
+                    }
+                };
+            }
         } catch (Exception e) {
-            logger.error("Error loading commit history", e);
+            logger.error("Error loading branches", e);
             JOptionPane.showMessageDialog(context.getFrame(),
-                    "Failed to load commit history: " + e.getMessage(),
+                    "Failed to load branches: " + e.getMessage(),
                     "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private static void handleBranchSwitch(String projectName, String userName, String branchName, boolean createNew) {
+        try {
+            // Get current status for warnings
+            BranchStatus status = rpc.getBranchStatus(projectName, userName);
+
+            // Show confirmation dialog if there are warnings
+            if (status.hasWarnings()) {
+                String warningMessage = status.getWarningMessage();
+                warningMessage += "\nDo you want to proceed with switching branches?";
+
+                int choice = JOptionPane.showConfirmDialog(context.getFrame(),
+                        warningMessage,
+                        "Warning - Uncommitted Changes",
+                        JOptionPane.YES_NO_OPTION,
+                        JOptionPane.WARNING_MESSAGE);
+
+                if (choice != JOptionPane.YES_OPTION) {
+                    return; // User cancelled
+                }
+            }
+
+            // Perform the branch switch
+            logger.info("Switching to branch: {}, createNew: {}", branchName, createNew);
+            boolean success = rpc.switchBranch(projectName, userName, branchName, createNew);
+
+            if (success) {
+                branchPopup.dispose();
+                branchPopup = null;
+
+                String message = createNew ?
+                        "Successfully created and switched to branch: " + branchName :
+                        "Successfully switched to branch: " + branchName;
+
+                JOptionPane.showMessageDialog(context.getFrame(),
+                        message,
+                        "Success",
+                        JOptionPane.INFORMATION_MESSAGE);
+            }
+
+        } catch (Exception e) {
+            logger.error("Error switching branch", e);
+            JOptionPane.showMessageDialog(context.getFrame(),
+                    "Failed to switch branch: " + e.getMessage(),
+                    "Error",
+                    JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private static void handleBranchRefresh(String projectName, String userName) {
+        try {
+            logger.info("Refreshing branch list...");
+
+            // Fetch from remote
+            rpc.fetchFromRemote(projectName, userName);
+
+            // Refresh data
+            List<BranchInfo> branches = rpc.listBranches(projectName, userName);
+            BranchStatus status = rpc.getBranchStatus(projectName, userName);
+
+            Object[][] data = buildBranchTableData(branches);
+
+            if (branchPopup != null) {
+                branchPopup.updateData(data, status);
+            }
+
+            JOptionPane.showMessageDialog(context.getFrame(),
+                    "Branch list refreshed successfully.",
+                    "Refresh Complete",
+                    JOptionPane.INFORMATION_MESSAGE);
+
+        } catch (Exception e) {
+            logger.error("Error refreshing branches", e);
+            JOptionPane.showMessageDialog(context.getFrame(),
+                    "Failed to refresh branches: " + e.getMessage(),
+                    "Error",
+                    JOptionPane.ERROR_MESSAGE);
         }
     }
 }

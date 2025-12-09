@@ -67,6 +67,37 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
         return getCommitHistoryImpl(projectName, userName, maxCount);
     }
 
+    @Override
+    public List<BranchInfo> listBranches(String projectName,
+                                        String userName) throws Exception {
+        return listBranchesImpl(projectName, userName);
+    }
+
+    @Override
+    public boolean fetchFromRemote(String projectName,
+                                   String userName) throws Exception {
+        return fetchFromRemoteImpl(projectName, userName);
+    }
+
+    @Override
+    public String getCurrentBranch(String projectName) throws Exception {
+        return getCurrentBranchImpl(projectName);
+    }
+
+    @Override
+    public BranchStatus getBranchStatus(String projectName,
+                                       String userName) throws Exception {
+        return getBranchStatusImpl(projectName, userName);
+    }
+
+    @Override
+    public boolean switchBranch(String projectName,
+                                String userName,
+                                String branchName,
+                                boolean createNew) throws Exception {
+        return switchBranchImpl(projectName, userName, branchName, createNew);
+    }
+
     protected abstract boolean pullImpl(String projectName, String userName, boolean importTags, boolean importTheme,
                                         boolean importImages) throws Exception;
     protected abstract boolean pushImpl(String projectName, String userName) throws Exception;
@@ -76,5 +107,10 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
     protected abstract boolean exportConfigImpl(String projectName);
     protected abstract void setupLocalRepoImpl(String projectName, String userName) throws Exception;
     protected abstract List<CommitInfo> getCommitHistoryImpl(String projectName, String userName, int maxCount);
+    protected abstract List<BranchInfo> listBranchesImpl(String projectName, String userName) throws Exception;
+    protected abstract boolean fetchFromRemoteImpl(String projectName, String userName) throws Exception;
+    protected abstract String getCurrentBranchImpl(String projectName) throws Exception;
+    protected abstract BranchStatus getBranchStatusImpl(String projectName, String userName) throws Exception;
+    protected abstract boolean switchBranchImpl(String projectName, String userName, String branchName, boolean createNew) throws Exception;
 
 }

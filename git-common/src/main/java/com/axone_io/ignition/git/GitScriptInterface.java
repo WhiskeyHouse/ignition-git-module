@@ -16,5 +16,11 @@ public interface GitScriptInterface {
     void setupLocalRepo(String projectName, String userName) throws Exception;
     List<CommitInfo> getCommitHistory(String projectName, String userName, int maxCount);
 
+    // Branch management methods
+    List<BranchInfo> listBranches(String projectName, String userName) throws Exception;
+    boolean fetchFromRemote(String projectName, String userName) throws Exception;
+    String getCurrentBranch(String projectName) throws Exception;
+    BranchStatus getBranchStatus(String projectName, String userName) throws Exception;
+    boolean switchBranch(String projectName, String userName, String branchName, boolean createNew) throws Exception;
 
 }

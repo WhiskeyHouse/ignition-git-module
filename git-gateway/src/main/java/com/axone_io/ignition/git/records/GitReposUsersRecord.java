@@ -24,12 +24,13 @@ public class GitReposUsersRecord extends PersistentRecord {
     public static final ReferenceField<GitProjectsConfigRecord> URI = new ReferenceField<>(META, GitProjectsConfigRecord.META, "URI", ProjectId);
 
     public static final StringField IgnitionUser = new StringField(META, "IgnitionUser", SFieldFlags.SPRIMARY_KEY, SFieldFlags.SMANDATORY, SFieldFlags.SDESCRIPTIVE);
-    public static final StringField SSHKey = new StringField(META, "SSHKey");
+    // Using EncodedStringField for secure SSH key storage with automatic encryption/decryption
+    public static final EncodedStringField SSHKey = new EncodedStringField(META, "SSHKey");
     public static final StringField UserName = new StringField(META, "UserName");
     public static final StringField Email = new StringField(META, "Email", SFieldFlags.SMANDATORY, SFieldFlags.SDESCRIPTIVE).setDefault("");
-    // TODO: Migrate to SecretConfig for proper secrets management in 8.3
-    // For now using StringField to get compilation working
-    public static final StringField Password = new StringField(META, "Password");
+    // Using EncodedStringField for secure password storage with automatic encryption/decryption
+    // TODO: Consider migrating to SecretConfig for enhanced secrets management in future versions
+    public static final EncodedStringField Password = new EncodedStringField(META, "Password");
 
     // Category removed in 8.3 - was only used for Wicket form grouping
     // static final Category UserProperties = new Category("GitReposUsersRecord.Category.UserProperties", 1000).include(ProjectName, IgnitionUser, UserName, Email, SSHKey, Password);

@@ -57,6 +57,7 @@ Before installing and running this project on your local machine, make sure you 
 
 - Java (JDK >= 17) - Required for Ignition 8.3+ compatibility
 - Maven
+- Node.js (>= 18) - Required for building React components
 - Java IDE (I recommend [Intellij](https://www.jetbrains.com/idea/download/))
 
 If you are using Intellij, Maven is already integrated in the IDE and you can easily download the right Java SDK from your project settings.
@@ -65,12 +66,22 @@ If you are using Intellij, Maven is already integrated in the IDE and you can ea
 
 To install and run this project on your local machine, follow these steps :
 
-1. Clone the repo to your local machine: `git clone https://github.com/your-username/your-project.git`.
+1. Clone the repo to your local machine: `git clone https://github.com/WHK01/ignition-git-module.git`.
 2. Open the project in your preferred IDE.
-3. Build the project using Maven by running the following command: mvn clean package.
-4. Install the module on your gateway.
+3. Build the project using Maven by running the following command: `mvn clean package`.
+4. The `.modl` file will be located in `git-build/target/`.
+5. Install the module on your gateway via Config > System > Modules.
 
 That's it ! You're ready to start working with the project on your local machine.
+
+## Release Pipeline
+
+This project uses automated GitHub Actions workflows for building and releasing:
+
+- **Continuous Integration**: Automatically builds and tests on PRs and main branch
+- **Automated Releases**: Tag-based releases with signed module files
+
+For detailed information about creating releases, code signing, and the release process, see [RELEASE.md](RELEASE.md).
 
 ## Roadmap
 
