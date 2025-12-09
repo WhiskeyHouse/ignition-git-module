@@ -2,11 +2,15 @@ package com.axone_io.ignition.git.web.api;
 
 import com.google.gson.JsonObject;
 import com.inductiveautomation.ignition.gateway.dataroutes.RequestContext;
+import com.inductiveautomation.ignition.gateway.dataroutes.RouteHandler;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.security.SecureRandom;
+import java.util.Base64;
 
 /**
  * Security helper for gateway data routes providing authentication, authorization, and CSRF protection.
@@ -20,6 +24,21 @@ public class RouteSecurityHelper {
 
     private static final String CSRF_TOKEN_HEADER = "X-CSRF-Token";
     private static final String CSRF_TOKEN_SESSION_ATTR = "CSRF_TOKEN";
+
+    /**
+     * Sanitizes a string value for safe logging by removing newlines and control characters
+     * that could be used for log injection attacks.
+     *
+     * @param value The value to sanitize
+     * @return Sanitized string safe for logging
+     */
+    private static String sanitizeForLogging(String value) {
+        if (value == null) {
+            return "null";
+        }
+        // Replace newlines, carriage returns, and other control characters
+        return value.replaceAll("[\\r\\n\\t]", " ").replaceAll("\\p{Cntrl}", "");
+    }
 
     /**
      * Security check result containing authentication and authorization status
@@ -69,7 +88,7 @@ public class RouteSecurityHelper {
      * @param handler The route handler to protect
      * @return A wrapped handler that performs authentication checks
      */
-    public static SecuredRouteHandler requireAuthentication(SecuredRouteHandler handler) {
+    public static RouteHandler requireAuthentication(SecuredRouteHandler handler) {
         return (req, res) -> {
             SecurityCheckResult authCheck = checkAuthentication(req);
 
@@ -92,7 +111,7 @@ public class RouteSecurityHelper {
      * @param handler The route handler to protect
      * @return A wrapped handler that performs authentication and CSRF checks
      */
-    public static SecuredRouteHandler requireAuthenticationAndCsrf(SecuredRouteHandler handler) {
+    public static RouteHandler requireAuthenticationAndCsrf(SecuredRouteHandler handler) {
         return (req, res) -> {
             // First check authentication
             SecurityCheckResult authCheck = checkAuthentication(req);
@@ -183,8 +202,6 @@ public class RouteSecurityHelper {
             Object sessionToken = session.getAttribute(CSRF_TOKEN_SESSION_ATTR);
 
             if (sessionToken == null) {
-                // Generate a new token if one doesn't exist
-                // In a real implementation, this should be set during login
                 logger.warn("No CSRF token in session. This should be set during authentication.");
                 return SecurityCheckResult.forbidden(
                     "CSRF token not initialized. Please refresh your session."
@@ -193,7 +210,11 @@ public class RouteSecurityHelper {
 
             // Validate tokens match
             if (!requestToken.equals(sessionToken.toString())) {
-                logger.warn("CSRF token mismatch. Expected: {}, Got: {}", sessionToken, requestToken);
+                String requestPath = httpReq.getRequestURI();
+                Object userAttr = session.getAttribute("user");
+                String userId = userAttr != null ? userAttr.toString() : "unknown";
+                logger.warn("CSRF token mismatch detected - Path: {}, User: {}, SessionId: {}",
+                    sanitizeForLogging(requestPath), sanitizeForLogging(userId), session.getId());
                 return SecurityCheckResult.forbidden("Invalid CSRF token");
             }
 
@@ -203,6 +224,78 @@ public class RouteSecurityHelper {
         } catch (Exception e) {
             logger.error("Error validating CSRF token", e);
             return SecurityCheckResult.forbidden("CSRF validation failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Generates a cryptographically secure CSRF token.
+     *
+     * @return A base64-encoded random token
+     */
+    private static String generateCsrfToken() {
+        SecureRandom secureRandom = new SecureRandom();
+        byte[] tokenBytes = new byte[32]; // 256 bits
+        secureRandom.nextBytes(tokenBytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(tokenBytes);
+    }
+
+    /**
+     * Gets or creates a CSRF token for the current session.
+     * If a token doesn't exist in the session, a new one is generated and stored.
+     *
+     * @param session The HTTP session
+     * @return The CSRF token for this session
+     */
+    public static String getOrCreateCsrfToken(HttpSession session) {
+        Object existingToken = session.getAttribute(CSRF_TOKEN_SESSION_ATTR);
+
+        if (existingToken != null) {
+            logger.debug("Returning existing CSRF token for session: {}", session.getId());
+            return existingToken.toString();
+        }
+
+        // Generate new token
+        String newToken = generateCsrfToken();
+        session.setAttribute(CSRF_TOKEN_SESSION_ATTR, newToken);
+        logger.info("Generated new CSRF token for session: {}", session.getId());
+
+        return newToken;
+    }
+
+    /**
+     * Route handler that returns the CSRF token for the authenticated user's session.
+     * This endpoint should be called by the frontend when the page loads to obtain
+     * the CSRF token, which must then be included in all mutating requests
+     * (POST/PUT/DELETE) via the X-CSRF-Token header.
+     *
+     * @param req The request context
+     * @param res The HTTP response
+     * @return JSON object containing the CSRF token
+     */
+    public static Object getCsrfToken(RequestContext req, HttpServletResponse res) {
+        try {
+            HttpServletRequest httpReq = req.getRequest();
+            HttpSession session = httpReq.getSession(false);
+
+            if (session == null) {
+                res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                JsonObject error = new JsonObject();
+                error.addProperty("error", "No active session. Please log in to the Gateway.");
+                return error;
+            }
+
+            String token = getOrCreateCsrfToken(session);
+
+            JsonObject response = new JsonObject();
+            response.addProperty("csrfToken", token);
+            return response;
+
+        } catch (Exception e) {
+            logger.error("Error generating CSRF token", e);
+            res.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            JsonObject error = new JsonObject();
+            error.addProperty("error", "Failed to generate CSRF token: " + e.getMessage());
+            return error;
         }
     }
 }

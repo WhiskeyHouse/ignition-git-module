@@ -32,6 +32,14 @@ public class GitRoutes {
         logger.info("GitRoutes.mountRoutes called - starting to mount routes");
         logger.info("RouteGroup instance: " + routes.getClass().getName());
 
+        // CSRF token endpoint - must be called first by frontend to obtain token
+        routes.newRoute("/csrf-token")
+            .type(RouteGroup.TYPE_JSON)
+            .handler(RouteSecurityHelper::getCsrfToken)
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .mount();
+        logger.info("Mounted CSRF token route: /csrf-token (GET)");
+
         // Projects routes - all protected with authentication and CSRF validation
         try {
             logger.info("Mounting route: /projects (GET)");

@@ -13,6 +13,7 @@ interface State {
   error: string | null;
   editing: GitProject | null;
   isNew: boolean;
+  csrfToken: string | null;
 }
 
 export class GitProjectsConfig extends Component<{}, State> {
@@ -23,12 +24,34 @@ export class GitProjectsConfig extends Component<{}, State> {
       loading: true,
       error: null,
       editing: null,
-      isNew: false
+      isNew: false,
+      csrfToken: null
     };
   }
 
-  componentDidMount() {
-    this.loadProjects();
+  async componentDidMount() {
+    await this.loadCsrfToken();
+    await this.loadProjects();
+  }
+
+  async loadCsrfToken() {
+    try {
+      const response = await fetch('/data/git/csrf-token', {
+        credentials: 'same-origin',
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+      if (!response.ok) throw new Error('Failed to load CSRF token');
+      const data = await response.json();
+      this.setState({ csrfToken: data.csrfToken });
+    } catch (error) {
+      console.error('Error loading CSRF token:', error);
+      this.setState({
+        error: 'Failed to initialize security token. Please refresh the page.',
+        loading: false
+      });
+    }
   }
 
   async loadProjects() {
@@ -64,12 +87,19 @@ export class GitProjectsConfig extends Component<{}, State> {
   handleDelete = async (id: number) => {
     if (!confirm('Are you sure you want to delete this project?')) return;
 
+    const { csrfToken } = this.state;
+    if (!csrfToken) {
+      alert('Security token not available. Please refresh the page.');
+      return;
+    }
+
     try {
       const response = await fetch(`/data/git/projects/${id}`, {
         method: 'DELETE',
         credentials: 'same-origin',
         headers: {
-          'Accept': 'application/json'
+          'Accept': 'application/json',
+          'X-CSRF-Token': csrfToken
         }
       });
       if (!response.ok) throw new Error('Failed to delete project');
@@ -80,8 +110,13 @@ export class GitProjectsConfig extends Component<{}, State> {
   };
 
   handleSave = async () => {
-    const { editing, isNew } = this.state;
+    const { editing, isNew, csrfToken } = this.state;
     if (!editing) return;
+
+    if (!csrfToken) {
+      alert('Security token not available. Please refresh the page.');
+      return;
+    }
 
     try {
       const url = isNew ? '/data/git/projects' : `/data/git/projects/${editing.id}`;
@@ -92,7 +127,8 @@ export class GitProjectsConfig extends Component<{}, State> {
         credentials: 'same-origin',
         headers: {
           'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          'Accept': 'application/json',
+          'X-CSRF-Token': csrfToken
         },
         body: JSON.stringify(editing)
       });
