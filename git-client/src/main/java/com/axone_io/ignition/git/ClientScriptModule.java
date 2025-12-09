@@ -1,19 +1,18 @@
 package com.axone_io.ignition.git;
 
-import com.inductiveautomation.ignition.client.gateway_interface.ModuleRPCFactory;
-import com.inductiveautomation.ignition.common.Dataset;
-
 import java.util.List;
 
 public class ClientScriptModule extends AbstractScriptModule {
 
     private final GitScriptInterface rpc;
 
-    public ClientScriptModule() {
-        rpc = ModuleRPCFactory.create(
-            "com.axone_io.ignition.git",
-            GitScriptInterface.class
-        );
+    /**
+     * Constructor that accepts an RPC interface.
+     * In 8.3+, obtain the RPC interface using:
+     * context.getGatewayInterface().getRpcInterface(GitScriptInterface.class)
+     */
+    public ClientScriptModule(GitScriptInterface rpc) {
+        this.rpc = rpc;
     }
 
     @Override
@@ -28,12 +27,12 @@ public class ClientScriptModule extends AbstractScriptModule {
     }
 
     @Override
-    protected boolean commitImpl(String projectName, String userName, List<String> changes, String message) {
+    protected boolean commitImpl(String projectName, String userName, String[] changes, String message) {
         return rpc.commit(projectName, userName, changes, message);
     }
 
     @Override
-    protected Dataset getUncommitedChangesImpl(String projectName, String userName) {
+    protected List<UncommittedChange> getUncommitedChangesImpl(String projectName, String userName) {
         return rpc.getUncommitedChanges(projectName, userName);
     }
 

@@ -3,20 +3,21 @@ package com.axone_io.ignition.git;
 import com.axone_io.ignition.git.commissioning.utils.GitCommissioningUtils;
 import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
 import com.axone_io.ignition.git.records.GitReposUsersRecord;
-import com.axone_io.ignition.git.web.GitProjectsConfigPage;
+import com.axone_io.ignition.git.web.api.GitProjectsServlet;
+import com.axone_io.ignition.git.web.api.GitUsersServlet;
 import com.inductiveautomation.ignition.common.BundleUtil;
 import com.inductiveautomation.ignition.common.licensing.LicenseState;
-import com.inductiveautomation.ignition.gateway.clientcomm.ClientReqSession;
+import com.inductiveautomation.ignition.common.rpc.proto.ProtoRpcSerializer;
+import com.inductiveautomation.ignition.gateway.dataroutes.RouteGroup;
 import com.inductiveautomation.ignition.gateway.model.AbstractGatewayModuleHook;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
-import com.inductiveautomation.ignition.gateway.web.models.ConfigCategory;
-import com.inductiveautomation.ignition.gateway.web.models.IConfigTab;
+import com.inductiveautomation.ignition.gateway.rpc.GatewayRpcImplementation;
+import com.inductiveautomation.ignition.gateway.web.systemjs.SystemJsModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.SQLException;
-import java.util.Collections;
-import java.util.List;
+import java.util.Optional;
 
 public class GatewayHook extends AbstractGatewayModuleHook {
     static public String MODULE_NAME = "Git";
@@ -24,19 +25,6 @@ public class GatewayHook extends AbstractGatewayModuleHook {
 
     private GatewayScriptModule scriptModule;
     public static GatewayContext context;
-
-    public static final ConfigCategory CONFIG_CATEGORY =
-            new ConfigCategory(MODULE_NAME, "bundle_git.Config.Git.MenuTitle", 700);
-
-    @Override
-    public List<? extends IConfigTab> getConfigPanels() {
-        return List.of(GitProjectsConfigPage.MENU_ENTRY);
-    }
-
-    @Override
-    public List<ConfigCategory> getConfigCategories() {
-        return Collections.singletonList(CONFIG_CATEGORY);
-    }
 
 
     @Override
@@ -46,7 +34,61 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         BundleUtil.get().addBundle("bundle_git", getClass(), "bundle_git");
         verifySchema(gatewayContext);
 
+        // Register React-based config pages using 8.3 navigation API
+        registerConfigPages(gatewayContext);
+
         logger.info("setup()");
+    }
+
+    @Override
+    public Optional<GatewayRpcImplementation> getRpcImplementation() {
+        // Return RPC implementation for 8.3 pattern using default protobuf serializer
+        return Optional.of(GatewayRpcImplementation.of(
+                ProtoRpcSerializer.DEFAULT_INSTANCE,
+                scriptModule
+        ));
+    }
+
+    // Removed - using mountRouteHandlers instead for Ignition 8.3
+
+    private void registerConfigPages(GatewayContext context) {
+        try {
+            // Create SystemJsModule for Git Projects config page
+            // Note: The first parameter is the exported React component name from your JS file
+            // The second parameter uses /res/{alias}/{filename} - getMountedResourceFolder() automatically
+            // maps the "mounted" folder, so we don't include it in the path
+            SystemJsModule projectsModule = new SystemJsModule(
+                    "GitProjectsConfig",
+                    "/res/git/GitProjectsConfig.js"
+            );
+
+            // Create SystemJsModule for Git Users config page
+            SystemJsModule usersModule = new SystemJsModule(
+                    "GitUsersConfig",
+                    "/res/git/GitUsersConfig.js"
+            );
+
+            // Add Git configuration category to Platform section
+            // Using getPlatform() to add to Platform section where config pages go in 8.3
+            context.getWebResourceManager().getNavigationModel()
+                    .getPlatform()
+                    .addCategory("git", cat -> cat
+                            .label("Git")
+                            .addPage("Git Projects", page -> page
+                                    .position(10)
+                                    // The second parameter must match the export name in your JS file
+                                    .mount("/git/projects", "GitProjectsConfig", projectsModule)
+                            )
+                            .addPage("Git Users", page -> page
+                                    .position(20)
+                                    .mount("/git/users", "GitUsersConfig", usersModule)
+                            )
+                    );
+
+            logger.info("Registered Git configuration pages");
+        } catch (Exception e) {
+            logger.error("Error registering config pages", e);
+        }
     }
 
     private void verifySchema(GatewayContext context) {
@@ -80,7 +122,19 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     }
 
     @Override
-    public Object getRPCHandler(ClientReqSession session, String projectName) {
-        return scriptModule;
+    public Optional<String> getMountedResourceFolder() {
+        return Optional.of("mounted");
+    }
+
+    @Override
+    public Optional<String> getMountPathAlias() {
+        return Optional.of("git");
+    }
+
+    @Override
+    public void mountRouteHandlers(RouteGroup routes) {
+        // Mount Git API routes - accessible at /main/data/com.axone_io.ignition.git/*
+        com.axone_io.ignition.git.web.api.GitRoutes.mountRoutes(routes);
+        logger.info("Mounted Git API routes");
     }
 }

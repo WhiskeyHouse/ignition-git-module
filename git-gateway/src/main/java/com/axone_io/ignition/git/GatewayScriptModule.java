@@ -6,11 +6,6 @@ import com.axone_io.ignition.git.managers.GitProjectManager;
 import com.axone_io.ignition.git.managers.GitTagManager;
 import com.axone_io.ignition.git.managers.GitThemeManager;
 import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
-import com.inductiveautomation.ignition.common.BasicDataset;
-import com.inductiveautomation.ignition.common.Dataset;
-import com.inductiveautomation.ignition.common.project.ProjectManifest;
-import com.inductiveautomation.ignition.common.project.ProjectSnapshot;
-import com.inductiveautomation.ignition.common.util.DatasetBuilder;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 import org.eclipse.jgit.api.*;
@@ -23,6 +18,7 @@ import org.eclipse.jgit.transport.URIish;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 
@@ -31,7 +27,7 @@ import static com.axone_io.ignition.git.managers.GitManager.*;
 import static com.axone_io.ignition.git.managers.GitTagManager.exportTag;
 import static com.axone_io.ignition.git.managers.GitThemeManager.exportTheme;
 
-public class GatewayScriptModule extends AbstractScriptModule {
+public class GatewayScriptModule extends AbstractScriptModule implements GitScriptInterface {
     private final LoggerEx logger = LoggerEx.newBuilder().build(getClass());
     private final GatewayContext context;
 
@@ -95,7 +91,7 @@ public class GatewayScriptModule extends AbstractScriptModule {
     }
 
     @Override
-    protected boolean commitImpl(String projectName, String userName, List<String> changes, String message) {
+    protected boolean commitImpl(String projectName, String userName, String[] changes, String message) {
         try (Git git = getGit(getProjectFolderPath(projectName))) {
             for (String change : changes) {
                 git.add().addFilepattern(change).call();
@@ -113,39 +109,56 @@ public class GatewayScriptModule extends AbstractScriptModule {
     }
 
     @Override
-    public Dataset getUncommitedChangesImpl(String projectName, String userName) {
+    public List<UncommittedChange> getUncommitedChangesImpl(String projectName, String userName) {
         Path projectPath = getProjectFolderPath(projectName);
-        Dataset ds;
-        List<String> changes = new ArrayList<>();
-        DatasetBuilder builder = new DatasetBuilder();
-        builder.colNames(List.of("resource", "type", "actor"));
-        builder.colTypes(List.of(String.class, String.class, String.class));
+        List<String> seenPaths = new ArrayList<>();
+        List<UncommittedChange> result = new ArrayList<>();
 
         try (Git git = getGit(projectPath)) {
             Status status = git.status().call();
 
             Set<String> missing = status.getMissing();
             logger.debug("Missing files: {}" + missing);
-            uncommittedChangesBuilder(projectName, missing, "Deleted", changes, builder);
+            collectUncommittedChanges(projectName, missing, "Deleted", seenPaths, result);
 
             Set<String> uncommittedChanges = status.getUncommittedChanges();
             logger.debug("Uncommitted changes: {}" + uncommittedChanges);
-            uncommittedChangesBuilder(projectName, uncommittedChanges, "Uncommitted", changes, builder);
+            collectUncommittedChanges(projectName, uncommittedChanges, "Uncommitted", seenPaths, result);
 
             Set<String> untracked = status.getUntracked();
             logger.debug("Untracked files: {}" + untracked);
-            uncommittedChangesBuilder(projectName, untracked, "Created", changes, builder);
+            collectUncommittedChanges(projectName, untracked, "Created", seenPaths, result);
 
             Set<String> modified = status.getChanged();
             logger.debug("Modified files: {}" + modified);
-            uncommittedChangesBuilder(projectName, modified, "Modified", changes, builder);
+            collectUncommittedChanges(projectName, modified, "Modified", seenPaths, result);
         } catch (Exception e) {
             logger.error(e.toString(), e);
-
         }
-        ds = builder.build();
 
-        return ds != null ? ds : new BasicDataset();
+        return result;
+    }
+
+    private void collectUncommittedChanges(String projectName,
+                                           Set<String> updates,
+                                           String type,
+                                           List<String> seenPaths,
+                                           List<UncommittedChange> result) {
+        for (String update : updates) {
+            String actor = "unknown";
+            String path = update;
+
+            if (hasActor(path)) {
+                String[] pathSplitted = update.split("/");
+                path = String.join("/", Arrays.copyOf(pathSplitted, pathSplitted.length - 1));
+                actor = getActor(projectName, path);
+            }
+
+            if (!seenPaths.contains(path)) {
+                seenPaths.add(path);
+                result.add(new UncommittedChange(path, type, actor));
+            }
+        }
     }
 
     @Override

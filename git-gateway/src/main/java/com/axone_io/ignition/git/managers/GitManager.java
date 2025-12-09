@@ -6,11 +6,10 @@ import com.axone_io.ignition.git.records.GitReposUsersRecord;
 import com.inductiveautomation.ignition.common.gson.Gson;
 import com.inductiveautomation.ignition.common.gson.JsonElement;
 import com.inductiveautomation.ignition.common.gson.JsonObject;
-import com.inductiveautomation.ignition.common.project.RuntimeProject;
-import com.inductiveautomation.ignition.common.project.resource.LastModification;
-import com.inductiveautomation.ignition.common.project.resource.ProjectResource;
-import com.inductiveautomation.ignition.common.project.resource.ResourcePath;
-import com.inductiveautomation.ignition.common.project.resource.ResourceType;
+import com.inductiveautomation.ignition.common.resourcecollection.RuntimeResourceCollection;
+import com.inductiveautomation.ignition.common.resourcecollection.Resource;
+import com.inductiveautomation.ignition.common.resourcecollection.ResourcePath;
+import com.inductiveautomation.ignition.common.resourcecollection.ResourceType;
 import com.inductiveautomation.ignition.common.util.DatasetBuilder;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.inductiveautomation.ignition.gateway.project.ProjectManager;
@@ -200,18 +199,9 @@ public class GitManager {
 //        return LastModification.of(projectResource).map(LastModification::getActor).orElse("unknown");
 //    }
     public static String getActor(String projectName, String path) {
-        ProjectManager projectManager = context.getProjectManager();
-        Optional<RuntimeProject> projectOpt = projectManager.getProject(projectName);
-
-        if (projectOpt.isPresent()) {
-            RuntimeProject project = projectOpt.get();
-            Optional<ProjectResource> resourceOpt = project.getResource(getResourcePath(path));
-
-            if (resourceOpt.isPresent()) {
-                ProjectResource projectResource = resourceOpt.get();
-                return LastModification.of(projectResource).map(LastModification::getActor).orElse("unknown");
-            }
-        }
+        // TODO: Implement actor tracking for 8.3 using Resource attributes
+        // The LastModification API was removed in 8.3
+        // For now, return "unknown" - can be enhanced later using Resource.getAttribute()
         return "unknown";
     }
 

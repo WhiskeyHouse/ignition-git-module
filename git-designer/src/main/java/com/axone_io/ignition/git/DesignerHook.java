@@ -2,11 +2,12 @@ package com.axone_io.ignition.git;
 
 import com.axone_io.ignition.git.actions.GitBaseAction;
 import com.axone_io.ignition.git.utils.IconUtils;
-import com.inductiveautomation.ignition.client.gateway_interface.ModuleRPCFactory;
+import com.inductiveautomation.ignition.client.gateway_interface.GatewayConnection;
 import com.inductiveautomation.ignition.common.BundleUtil;
-import com.inductiveautomation.ignition.common.SessionInfo;
+import com.inductiveautomation.ignition.common.ConcurrencySessionInfo;
 import com.inductiveautomation.ignition.common.licensing.LicenseState;
-import com.inductiveautomation.ignition.common.project.ChangeOperation;
+import com.inductiveautomation.ignition.common.resourcecollection.ChangeOperation;
+import com.inductiveautomation.ignition.common.rpc.proto.ProtoRpcSerializer;
 import com.inductiveautomation.ignition.designer.gui.DesignerToolbar;
 import com.inductiveautomation.ignition.designer.gui.StatusBar;
 import com.inductiveautomation.ignition.designer.model.DesignerContext;
@@ -14,6 +15,8 @@ import com.inductiveautomation.ignition.common.script.ScriptManager;
 import com.inductiveautomation.ignition.designer.model.AbstractDesignerModuleHook;
 import com.inductiveautomation.ignition.designer.model.SaveContext;
 import com.jidesoft.action.DockableBarManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.swing.*;
 import javax.swing.Timer;
@@ -21,11 +24,9 @@ import java.util.*;
 import java.util.List;
 
 public class DesignerHook extends AbstractDesignerModuleHook {
+    private static final Logger logger = LoggerFactory.getLogger(DesignerHook.class);
 
-    public static GitScriptInterface rpc = ModuleRPCFactory.create(
-            "com.axone_io.ignition.git",
-            GitScriptInterface.class
-    );
+    public static GitScriptInterface rpc;
     public static List<ChangeOperation> changes = new ArrayList<>();
     public static DesignerContext context;
     public static String projectName;
@@ -49,12 +50,30 @@ public class DesignerHook extends AbstractDesignerModuleHook {
         DesignerHook.context = context;
         BundleUtil.get().addBundle("DesignerHook", getClass(), "DesignerHook");
 
+        // Initialize RPC interface using new 8.3+ pattern
+        // Get RPC interface via GatewayConnection using ProtoRpcSerializer
+        rpc = GatewayConnection.getRpcInterface(
+                ProtoRpcSerializer.DEFAULT_INSTANCE,
+                "com.axone_io.ignition.git",  // Module ID
+                GitScriptInterface.class
+        );
+
         projectName = context.getProjectName();
 
-        Optional<SessionInfo> sessionInfo = context.getResourceEditManager().getCurrentSessionInfo();
-        userName = sessionInfo.isPresent() ? sessionInfo.get().getUsername() : "";
+        Optional<ConcurrencySessionInfo> sessionInfo = context.getResourceEditManager().getCurrentSessionInfo();
+        userName = sessionInfo.isPresent() ? sessionInfo.get().username() : "";
 
-        rpc.setupLocalRepo(projectName, userName);
+        // Attempt to setup local Git repository
+        try {
+            logger.info("Attempting Git setup for project: '{}', user: '{}'", projectName, userName);
+            rpc.setupLocalRepo(projectName, userName);
+            logger.info("Git setup successful for project: '{}'", projectName);
+        } catch (Exception e) {
+            logger.warn("Git not configured for project '{}' and user '{}': {}. Module will load but Git features may not work.",
+                        projectName, userName, e.getMessage());
+            logger.debug("Git setup error details:", e);
+            // Continue - module loads but Git features may not be fully functional
+        }
 
         initStatusBar();
         initToolBar();
@@ -71,7 +90,14 @@ public class DesignerHook extends AbstractDesignerModuleHook {
 
         gitStatusBar.add(new JLabel(userName));
 
-        boolean userValid = rpc.isRegisteredUser(projectName, userName);
+        // Check if user is registered (with error handling)
+        boolean userValid = false;
+        try {
+            userValid = rpc.isRegisteredUser(projectName, userName);
+        } catch (Exception e) {
+            logger.warn("Unable to check if user is registered: {}", e.getMessage());
+        }
+
         String userIconPath = userValid ? "/com/axone_io/ignition/git/icons/ic_verified_user.svg" : "/com/axone_io/ignition/git/icons/ic_unregister_user.svg";
         JLabel labelUserIcon = new JLabel(IconUtils.getIcon(userIconPath));
         labelUserIcon.setSize(35,35);
@@ -80,9 +106,13 @@ public class DesignerHook extends AbstractDesignerModuleHook {
         statusBar.addDisplay(gitStatusBar);
 
         gitUserTimer = new Timer(10000, e -> {
-            boolean valid = rpc.isRegisteredUser(projectName, userName);
-            String userIconPath1 = valid ? "/com/axone_io/ignition/git/icons/ic_verified_user.svg" : "/com/axone_io/ignition/git/icons/ic_unregister_user.svg";
-            labelUserIcon.setIcon(IconUtils.getIcon(userIconPath1));
+            try {
+                boolean valid = rpc.isRegisteredUser(projectName, userName);
+                String userIconPath1 = valid ? "/com/axone_io/ignition/git/icons/ic_verified_user.svg" : "/com/axone_io/ignition/git/icons/ic_unregister_user.svg";
+                labelUserIcon.setIcon(IconUtils.getIcon(userIconPath1));
+            } catch (Exception ex) {
+                logger.debug("Unable to check user registration status: {}", ex.getMessage());
+            }
         });
 
         gitUserTimer.start();
@@ -101,7 +131,7 @@ public class DesignerHook extends AbstractDesignerModuleHook {
     }
 
     @Override
-    public void notifyProjectSaveStart(SaveContext save) {
+    public void notifyProjectSaveStart(SaveContext save) throws Exception {
         changes = context.getProject().getChanges();
         super.notifyProjectSaveStart(save);
     }

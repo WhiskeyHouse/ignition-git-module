@@ -4,9 +4,9 @@ import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
 import com.axone_io.ignition.git.CommitPopup;
 import com.axone_io.ignition.git.DesignerHook;
 import com.axone_io.ignition.git.PullPopup;
-import com.inductiveautomation.ignition.common.Dataset;
-import com.inductiveautomation.ignition.common.project.ChangeOperation;
-import com.inductiveautomation.ignition.common.project.resource.ProjectResourceId;
+import com.axone_io.ignition.git.UncommittedChange;
+import com.inductiveautomation.ignition.common.resourcecollection.ChangeOperation;
+import com.inductiveautomation.ignition.common.resourcecollection.ResourceId;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 
 import javax.swing.*;
@@ -43,23 +43,24 @@ public class GitActionManager {
         // Log the total number of change operations found
         logger.debug("Total number of change operations: {}", changes.size());
 
-        Dataset ds = rpc.getUncommitedChanges(projectName, userName);
-        Object[][] data = new Object[ds.getRowCount()][];
+        List<UncommittedChange> uncommittedChanges = rpc.getUncommitedChanges(projectName, userName);
+        Object[][] data = new Object[uncommittedChanges.size()][];
 
         List<String> resourcesChangedId = new ArrayList<>();
         for (ChangeOperation c : changes) {
-            ProjectResourceId pri = ChangeOperation.getResourceIdFromChange(c);
-            resourcesChangedId.add(pri.getResourcePath().toString());
+            ResourceId rid = ChangeOperation.getResourceIdFromChange(c);
+            resourcesChangedId.add(rid.getResourcePath().toString());
 
             // Log each change operation's details
-            logger.debug("ChangeOperation Type: {}, Resource: {}", c.getOperationType(), pri.getResourcePath());
+            logger.debug("ChangeOperation Type: {}, Resource: {}", c.getOperationType(), rid.getResourcePath());
         }
 
-        for (int i = 0; i < ds.getRowCount(); i++) {
-            String resource = (String) ds.getValueAt(i, "resource");
+        for (int i = 0; i < uncommittedChanges.size(); i++) {
+            UncommittedChange change = uncommittedChanges.get(i);
+            String resource = change.getResource();
 
             boolean toAdd = resourcesChangedId.contains(resource);
-            Object[] row = {toAdd, resource, ds.getValueAt(i, "type"), ds.getValueAt(i, "actor")};
+            Object[] row = {toAdd, resource, change.getType(), change.getActor()};
 
             // Log the decision to add or not add the resource to the commit popup
             logger.debug("Resource: {}, Add to commit popup: {}", resource, toAdd);

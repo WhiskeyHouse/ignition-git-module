@@ -41,3 +41,7 @@ build/
 
 # Module Signer
 module-signer/
+node_modules
+
+.DS_Store
+*/.DS_Store

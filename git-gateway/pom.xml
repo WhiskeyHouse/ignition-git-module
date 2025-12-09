@@ -6,7 +6,7 @@
     <parent>
         <artifactId>git</artifactId>
         <groupId>com.axone_io.ignition</groupId>
-        <version>1.0.3</version>
+        <version>2.0.0</version>
     </parent>
 
 <!--    <groupId>WhiskeyHouse</groupId>-->
@@ -36,23 +36,23 @@
         <dependency>
             <groupId>org.eclipse.jgit</groupId>
             <artifactId>org.eclipse.jgit.ssh.jsch</artifactId>
-            <version>6.9.0.202403050737-r</version>
+            <version>7.1.0.202411261347-r</version>
         </dependency>
         <dependency>
             <groupId>org.yaml</groupId>
             <artifactId>snakeyaml</artifactId>
-            <version>1.33</version> <!-- Use the latest version available -->
+            <version>2.2</version>
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
-            <version>1.18.32</version>
+            <version>1.18.34</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
-            <version>4.12</version>
+            <version>4.13.2</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -62,10 +62,16 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.2</version>
+                <version>3.11.0</version>
                 <configuration>
-                    <source>${ignition-java-version}</source>
-                    <target>${ignition-java-version}</target>
+                    <release>${ignition-java-version}</release>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>1.18.34</version>
+                        </path>
+                    </annotationProcessorPaths>
                 </configuration>
             </plugin>
         </plugins>

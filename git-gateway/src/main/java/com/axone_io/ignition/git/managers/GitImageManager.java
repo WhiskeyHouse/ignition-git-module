@@ -1,10 +1,12 @@
 package com.axone_io.ignition.git.managers;
 
+import com.inductiveautomation.ignition.common.images.ImageFormat;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
-import com.inductiveautomation.ignition.gateway.images.ImageFormat;
 import com.inductiveautomation.ignition.gateway.images.ImageManager;
 import com.inductiveautomation.ignition.gateway.images.ImageRecord;
+import com.inductiveautomation.ignition.gateway.images.ImageResource;
 import com.inductiveautomation.ignition.gateway.localdb.persistence.PersistenceInterface;
+import com.inductiveautomation.ignition.gateway.localdb.persistence.BlobField;
 import simpleorm.dataset.SQuery;
 
 import javax.swing.*;
@@ -116,9 +118,13 @@ public class GitImageManager {
 
     public static void saveFolderImage(Path folderPath, String directory) {
         ImageManager imageManager = context.getImageManager();
-        for (ImageRecord imageRecord : imageManager.getImages(directory)) {
-            String path = imageRecord.getString(ImageRecord.Path);
-            if (imageRecord.isDirectory()) {
+        // In 8.3, getImages() returns ImageResource instead of ImageRecord
+        for (ImageResource imageResource : imageManager.getImages(directory)) {
+            String path = imageResource.path().toString();
+
+            // Check if it's a folder by checking if data is empty
+            if (!imageResource.data().hasBytes()) {
+                // This is a folder/directory
                 try {
                     Files.createDirectories(folderPath.resolve(path));
                 } catch (IOException e) {
@@ -127,7 +133,8 @@ public class GitImageManager {
 
                 saveFolderImage(folderPath, path);
             } else {
-                byte[] data = imageManager.getImage(path).getBytes(ImageRecord.Data);
+                // This is an actual image file
+                byte[] data = imageResource.data().getBytes();
 
                 try {
                     Files.write(folderPath.resolve(path), data);

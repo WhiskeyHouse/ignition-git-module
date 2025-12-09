@@ -72,7 +72,7 @@ public class GitBaseAction extends BaseAction {
         int messageType = JOptionPane.INFORMATION_MESSAGE;
 
         try {
-            rpc.commit(projectName, userName, changes, commitMessage);
+            rpc.commit(projectName, userName, changes.toArray(new String[0]), commitMessage);
             SwingUtilities.invokeLater(new Thread(() -> showConfirmPopup(message, messageType)));
         } catch (Exception ex) {
             ErrorUtil.showError(ex);

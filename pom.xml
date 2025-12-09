@@ -6,7 +6,7 @@
 
     <groupId>com.axone_io.ignition</groupId>
     <artifactId>git</artifactId>
-    <version>1.0.3</version>
+    <version>2.0.0</version>
     <packaging>pom</packaging>
 
     <modules>
@@ -18,9 +18,9 @@
     </modules>
 
     <properties>
-        <ignition-platform-version>8.1.0</ignition-platform-version>
+        <ignition-platform-version>8.3.1</ignition-platform-version>
         <ignition-sdk-version>${ignition-platform-version}</ignition-sdk-version>
-        <ignition-java-version>11</ignition-java-version>
+        <ignition-java-version>17</ignition-java-version>
         <module-name>Git</module-name>
         <module-description>Adds a simple scripting function to the client and gateway</module-description>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
