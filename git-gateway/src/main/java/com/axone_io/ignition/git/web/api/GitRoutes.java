@@ -17,8 +17,12 @@ import java.io.BufferedReader;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static com.axone_io.ignition.git.web.api.RouteSecurityHelper.requireAuthentication;
+import static com.axone_io.ignition.git.web.api.RouteSecurityHelper.requireAuthenticationAndCsrf;
+
 /**
- * Route handlers for Git configuration API endpoints
+ * Route handlers for Git configuration API endpoints.
+ * All routes are protected with session-based authentication and CSRF protection.
  */
 public class GitRoutes {
     private static final Logger logger = LoggerFactory.getLogger(GitRoutes.class);
@@ -28,12 +32,12 @@ public class GitRoutes {
         logger.info("GitRoutes.mountRoutes called - starting to mount routes");
         logger.info("RouteGroup instance: " + routes.getClass().getName());
 
-        // Projects routes
+        // Projects routes - all protected with authentication and CSRF validation
         try {
             logger.info("Mounting route: /projects (GET)");
             routes.newRoute("/projects")
                 .type(RouteGroup.TYPE_JSON)
-                .handler(GitRoutes::getProjects)
+                .handler(requireAuthentication(GitRoutes::getProjects))
                 .accessControl(AccessControlStrategy.OPEN_ROUTE)
                 .mount();
             logger.info("Successfully mounted route: /projects (GET)");
@@ -44,63 +48,63 @@ public class GitRoutes {
 
         routes.newRoute("/projects/:id")
             .type(RouteGroup.TYPE_JSON)
-            .handler(GitRoutes::getProject)
+            .handler(requireAuthentication(GitRoutes::getProject))
             .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
         routes.newRoute("/projects")
             .type(RouteGroup.TYPE_JSON)
             .method(HttpMethod.POST)
-            .handler(GitRoutes::createProject)
+            .handler(requireAuthenticationAndCsrf(GitRoutes::createProject))
             .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
         routes.newRoute("/projects/:id")
             .type(RouteGroup.TYPE_JSON)
             .method(HttpMethod.PUT)
-            .handler(GitRoutes::updateProject)
+            .handler(requireAuthenticationAndCsrf(GitRoutes::updateProject))
             .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
         routes.newRoute("/projects/:id")
             .type(RouteGroup.TYPE_JSON)
             .method(HttpMethod.DELETE)
-            .handler(GitRoutes::deleteProject)
+            .handler(requireAuthenticationAndCsrf(GitRoutes::deleteProject))
             .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
-        // Users routes
+        // Users routes - all protected with authentication and CSRF validation
         routes.newRoute("/users")
             .type(RouteGroup.TYPE_JSON)
-            .handler(GitRoutes::getUsers)
+            .handler(requireAuthentication(GitRoutes::getUsers))
             .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
         routes.newRoute("/users")
             .type(RouteGroup.TYPE_JSON)
             .method(HttpMethod.POST)
-            .handler(GitRoutes::createUser)
+            .handler(requireAuthenticationAndCsrf(GitRoutes::createUser))
             .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
         routes.newRoute("/users/:id")
             .type(RouteGroup.TYPE_JSON)
             .method(HttpMethod.PUT)
-            .handler(GitRoutes::updateUser)
+            .handler(requireAuthenticationAndCsrf(GitRoutes::updateUser))
             .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
         routes.newRoute("/users/:id")
             .type(RouteGroup.TYPE_JSON)
             .method(HttpMethod.DELETE)
-            .handler(GitRoutes::deleteUser)
+            .handler(requireAuthenticationAndCsrf(GitRoutes::deleteUser))
             .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
-        // Add a test route to verify routing is working
+        // Test route - also protected with authentication
         routes.newRoute("/test")
             .type(RouteGroup.TYPE_PLAIN_TEXT)
-            .handler((req, res) -> "Git module routes are working!")
+            .handler(requireAuthentication((req, res) -> "Git module routes are working!"))
             .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
         logger.info("Mounted test route: /test");
@@ -373,8 +377,9 @@ public class GitRoutes {
                         obj.addProperty("ignitionUser", u.getIgnitionUser() != null ? u.getIgnitionUser() : "");
                         obj.addProperty("userName", u.getUserName() != null ? u.getUserName() : "");
                         obj.addProperty("email", u.getEmail() != null ? u.getEmail() : "");
-                        obj.addProperty("password", u.getPassword() != null ? u.getPassword() : "");
-                        obj.addProperty("sshKey", u.getSSHKey() != null ? u.getSSHKey() : "");
+                        // Security: Never expose actual credentials - use boolean flags instead
+                        obj.addProperty("hasPassword", u.getPassword() != null && !u.getPassword().isEmpty());
+                        obj.addProperty("hasSshKey", u.getSSHKey() != null && !u.getSSHKey().isEmpty());
 
                         return obj;
                     })
@@ -429,8 +434,9 @@ public class GitRoutes {
             response.addProperty("ignitionUser", record.getIgnitionUser());
             response.addProperty("userName", record.getUserName());
             response.addProperty("email", record.getEmail());
-            response.addProperty("password", record.getPassword());
-            response.addProperty("sshKey", record.getSSHKey());
+            // Security: Never expose actual credentials - use boolean flags instead
+            response.addProperty("hasPassword", record.getPassword() != null && !record.getPassword().isEmpty());
+            response.addProperty("hasSshKey", record.getSSHKey() != null && !record.getSSHKey().isEmpty());
             return response;
         } catch (Exception e) {
             logger.error("Error creating user", e);
@@ -510,8 +516,9 @@ public class GitRoutes {
             response.addProperty("ignitionUser", record.getIgnitionUser());
             response.addProperty("userName", record.getUserName());
             response.addProperty("email", record.getEmail());
-            response.addProperty("password", record.getPassword());
-            response.addProperty("sshKey", record.getSSHKey());
+            // Security: Never expose actual credentials - use boolean flags instead
+            response.addProperty("hasPassword", record.getPassword() != null && !record.getPassword().isEmpty());
+            response.addProperty("hasSshKey", record.getSSHKey() != null && !record.getSSHKey().isEmpty());
             return response;
         } catch (Exception e) {
             logger.error("Error updating user", e);
