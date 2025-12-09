@@ -27,6 +27,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -443,10 +444,11 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             // Check for uncommitted changes
             Status status = git.status().call();
 
-            List<String> uncommittedFiles = new ArrayList<>();
-            uncommittedFiles.addAll(status.getModified());
-            uncommittedFiles.addAll(status.getChanged());
-            uncommittedFiles.addAll(status.getMissing());
+            LinkedHashSet<String> uncommittedFilesSet = new LinkedHashSet<>();
+            uncommittedFilesSet.addAll(status.getModified());
+            uncommittedFilesSet.addAll(status.getChanged());
+            uncommittedFilesSet.addAll(status.getMissing());
+            List<String> uncommittedFiles = new ArrayList<>(uncommittedFilesSet);
 
             List<String> untrackedFiles = new ArrayList<>(status.getUntracked());
 
@@ -527,6 +529,15 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
             checkout.call();
             logger.info("Successfully switched to branch: " + branchName);
+
+            // Reload the project to reflect the new branch's contents
+            GitProjectManager.importProject(projectName);
+
+            // Import associated resources that may have changed
+            GitTagManager.importTagManager(projectName);
+            GitThemeManager.importTheme(projectName);
+            GitImageManager.importImages(projectName);
+
             return true;
 
         } catch (Exception e) {

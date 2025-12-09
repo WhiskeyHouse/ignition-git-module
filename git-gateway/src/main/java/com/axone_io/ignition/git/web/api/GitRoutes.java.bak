@@ -236,46 +236,6 @@ public class GitRoutes {
             BufferedReader reader = req.getRequest().getReader();
             JsonObject body = gson.fromJson(reader, JsonObject.class);
 
-            // Validate request body
-            if (body == null) {
-                res.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-                JsonObject error = new JsonObject();
-                error.addProperty("error", "Request body is required");
-                return error;
-            }
-
-            // Validate required fields
-            if (!body.has("projectName") || !body.get("projectName").isJsonPrimitive()) {
-                res.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-                JsonObject error = new JsonObject();
-                error.addProperty("error", "Missing or invalid required field: projectName");
-                return error;
-            }
-
-            if (!body.has("uri") || !body.get("uri").isJsonPrimitive()) {
-                res.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-                JsonObject error = new JsonObject();
-                error.addProperty("error", "Missing or invalid required field: uri");
-                return error;
-            }
-
-            String projectName = body.get("projectName").getAsString();
-            String uri = body.get("uri").getAsString();
-
-            if (projectName == null || projectName.trim().isEmpty()) {
-                res.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-                JsonObject error = new JsonObject();
-                error.addProperty("error", "Field projectName cannot be empty");
-                return error;
-            }
-
-            if (uri == null || uri.trim().isEmpty()) {
-                res.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-                JsonObject error = new JsonObject();
-                error.addProperty("error", "Field uri cannot be empty");
-                return error;
-            }
-
             GitProjectsConfigRecord record = req.getGatewayContext()
                     .getPersistenceInterface()
                     .find(GitProjectsConfigRecord.META, id);
@@ -287,8 +247,8 @@ public class GitRoutes {
                 return error;
             }
 
-            record.setProjectName(projectName);
-            record.setURI(uri);
+            record.setProjectName(body.get("projectName").getAsString());
+            record.setURI(body.get("uri").getAsString());
 
             req.getGatewayContext().getPersistenceInterface().save(record);
 

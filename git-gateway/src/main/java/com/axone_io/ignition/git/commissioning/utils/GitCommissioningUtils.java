@@ -15,6 +15,8 @@ import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.inductiveautomation.ignition.gateway.localdb.persistence.PersistenceInterface;
 import com.inductiveautomation.ignition.gateway.project.ProjectManager;
 import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.LoaderOptions;
+import org.yaml.snakeyaml.constructor.SafeConstructor;
 import simpleorm.dataset.SQuery;
 
 import java.io.*;
@@ -62,7 +64,7 @@ public class GitCommissioningUtils {
                             throw new RuntimeException("Incomplete git configuration file.");
                         }
 
-                        projectManager.create(config.getIgnitionProjectName(), new ResourceCollectionManifest(config.getIgnitionProjectName(), "", false, config.isIgnitionProjectInheritable(), config.getIgnitionProjectParentName()), new ArrayList());
+                        projectManager.create(config.getIgnitionProjectName(), new ResourceCollectionManifest(config.getIgnitionProjectName(), "", false, config.isIgnitionProjectInheritable(), config.getIgnitionProjectParentName()), new ArrayList<>());
 
                         Path projectDir = getProjectFolderPath(config.getIgnitionProjectName());
                         clearDirectory(projectDir);
@@ -132,7 +134,8 @@ public class GitCommissioningUtils {
     protected static ProjectConfigs parseYaml(Path yamlFilePath) {
         try (InputStream inputStream = new FileInputStream(yamlFilePath.toFile())) {
 //            Yaml yaml = new Yaml(new Constructor(ProjectConfigs.class));
-            Yaml yaml = new Yaml();
+            LoaderOptions loaderOptions = new LoaderOptions();
+            Yaml yaml = new Yaml(new SafeConstructor(loaderOptions));
             Object obj = yaml.load(inputStream);
 
             ProjectConfigs projectConfigs = new ProjectConfigs();

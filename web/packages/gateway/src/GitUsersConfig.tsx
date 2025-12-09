@@ -1,7 +1,19 @@
 import React, { Component } from 'react';
 import './config.css';
 
+// Response from API - uses boolean flags instead of raw secrets
 interface GitUser {
+  id: number;
+  projectName: string;
+  ignitionUser: string;
+  userName: string;
+  email: string;
+  hasPassword: boolean;
+  hasSshKey: boolean;
+}
+
+// Form data for editing - includes raw values when updating
+interface GitUserForm {
   id: number;
   projectName: string;
   ignitionUser: string;
@@ -16,7 +28,7 @@ interface State {
   projects: string[];
   loading: boolean;
   error: string | null;
-  editing: GitUser | null;
+  editing: GitUserForm | null;
   isNew: boolean;
 }
 
@@ -40,8 +52,14 @@ export class GitUsersConfig extends Component<{}, State> {
   async loadData() {
     try {
       const [usersRes, projectsRes] = await Promise.all([
-        fetch('/data/git/users'),
-        fetch('/data/git/projects')
+        fetch('/data/git/users', {
+          credentials: 'same-origin',
+          headers: { 'Accept': 'application/json' }
+        }),
+        fetch('/data/git/projects', {
+          credentials: 'same-origin',
+          headers: { 'Accept': 'application/json' }
+        })
       ]);
 
       if (!usersRes.ok || !projectsRes.ok) throw new Error('Failed to load data');
@@ -60,7 +78,19 @@ export class GitUsersConfig extends Component<{}, State> {
   }
 
   handleEdit = (user: GitUser) => {
-    this.setState({ editing: { ...user }, isNew: false });
+    // Convert GitUser (with flags) to GitUserForm (with empty secrets for editing)
+    this.setState({
+      editing: {
+        id: user.id,
+        projectName: user.projectName,
+        ignitionUser: user.ignitionUser,
+        userName: user.userName,
+        email: user.email,
+        password: '', // Start empty - user can update if needed
+        sshKey: ''    // Start empty - user can update if needed
+      },
+      isNew: false
+    });
   };
 
   handleNew = () => {
@@ -83,7 +113,9 @@ export class GitUsersConfig extends Component<{}, State> {
 
     try {
       const response = await fetch(`/data/git/users/${id}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' }
       });
       if (!response.ok) throw new Error('Failed to delete user');
       await this.loadData();
@@ -102,18 +134,25 @@ export class GitUsersConfig extends Component<{}, State> {
       return;
     }
 
-    if (!editing.password && !editing.sshKey) {
+    // For new users, require at least one auth method
+    if (isNew && !editing.password && !editing.sshKey) {
       alert('Either Password or SSH Key must be provided');
       return;
     }
 
+    // For updates, only send password/sshKey if they were changed
+    // If empty, the backend will preserve the existing values
     try {
       const url = isNew ? '/data/git/users' : `/data/git/users/${editing.id}`;
       const method = isNew ? 'POST' : 'PUT';
 
       const response = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify(editing)
       });
 
@@ -130,7 +169,7 @@ export class GitUsersConfig extends Component<{}, State> {
     this.setState({ editing: null, isNew: false });
   };
 
-  handleChange = (field: keyof GitUser, value: string) => {
+  handleChange = (field: keyof GitUserForm, value: string) => {
     this.setState(state => ({
       editing: state.editing ? { ...state.editing, [field]: value } : null
     }));
@@ -199,9 +238,12 @@ export class GitUsersConfig extends Component<{}, State> {
                 type="password"
                 value={editing.password}
                 onChange={(e) => this.handleChange('password', e.target.value)}
-                placeholder="••••••••"
+                placeholder={this.state.isNew ? "Enter password" : "Leave empty to keep existing"}
               />
-              <small>For HTTPS authentication</small>
+              <small>
+                For HTTPS authentication
+                {!this.state.isNew && ' - Leave empty to keep current password'}
+              </small>
             </div>
 
             <div className="form-group">
@@ -209,10 +251,13 @@ export class GitUsersConfig extends Component<{}, State> {
               <textarea
                 value={editing.sshKey}
                 onChange={(e) => this.handleChange('sshKey', e.target.value)}
-                placeholder="-----BEGIN RSA PRIVATE KEY-----"
+                placeholder={this.state.isNew ? "-----BEGIN RSA PRIVATE KEY-----" : "Leave empty to keep existing"}
                 rows={5}
               />
-              <small>For SSH authentication</small>
+              <small>
+                For SSH authentication
+                {!this.state.isNew && ' - Leave empty to keep current SSH key'}
+              </small>
             </div>
 
             <div className="button-group">
@@ -261,7 +306,11 @@ export class GitUsersConfig extends Component<{}, State> {
                       <td>{user.ignitionUser}</td>
                       <td>{user.userName || '-'}</td>
                       <td>{user.email}</td>
-                      <td>{user.sshKey ? 'SSH' : 'Password'}</td>
+                      <td>
+                        {user.hasSshKey && user.hasPassword ? 'SSH + Password' :
+                         user.hasSshKey ? 'SSH' :
+                         user.hasPassword ? 'Password' : 'None'}
+                      </td>
                       <td>
                         <button
                           onClick={() => this.handleEdit(user)}

@@ -212,7 +212,7 @@ public class BranchPopup extends JFrame {
             rowSorter.setRowFilter(null);
         } else {
             // Filter on branch name column
-            rowSorter.setRowFilter(RowFilter.regexFilter("(?i)" + searchText, 0));
+            rowSorter.setRowFilter(RowFilter.regexFilter("(?i)" + java.util.regex.Pattern.quote(searchText), 0));
         }
     }
 

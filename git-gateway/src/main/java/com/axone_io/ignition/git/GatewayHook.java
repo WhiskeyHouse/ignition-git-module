@@ -3,8 +3,6 @@ package com.axone_io.ignition.git;
 import com.axone_io.ignition.git.commissioning.utils.GitCommissioningUtils;
 import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
 import com.axone_io.ignition.git.records.GitReposUsersRecord;
-import com.axone_io.ignition.git.web.api.GitProjectsServlet;
-import com.axone_io.ignition.git.web.api.GitUsersServlet;
 import com.inductiveautomation.ignition.common.BundleUtil;
 import com.inductiveautomation.ignition.common.licensing.LicenseState;
 import com.inductiveautomation.ignition.common.rpc.proto.ProtoRpcSerializer;
@@ -134,7 +132,21 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     @Override
     public void mountRouteHandlers(RouteGroup routes) {
         // Mount Git API routes - accessible at /main/data/com.axone_io.ignition.git/*
+        //
+        // SECURITY: All routes are protected with SecurityZoneAccessControlStrategy which provides:
+        // - Authentication: Requires valid gateway session (users must be logged in)
+        // - Authorization: Requires security zone permissions
+        //   * ZONE_READ: For GET endpoints (read-only access)
+        //   * ZONE_WRITE: For POST/PUT/DELETE endpoints (modify access)
+        // - CSRF Protection: Explicitly validated for all mutating operations (POST/PUT/DELETE)
+        //   * CSRF tokens are checked against gateway session tokens via WebSessionManager
+        //   * Tokens can be provided in X-CSRF-Token header or csrfToken form field
+        //   * Returns HTTP 403 Forbidden on CSRF validation failure
+        //
+        // These security measures ensure that only authorized gateway users with proper
+        // configuration permissions can access these endpoints, protecting against unauthorized
+        // access and CSRF attacks on Git project configurations and user credentials.
         com.axone_io.ignition.git.web.api.GitRoutes.mountRoutes(routes);
-        logger.info("Mounted Git API routes");
+        logger.info("Mounted Git API routes with SecurityZoneAccessControl and explicit CSRF protection");
     }
 }

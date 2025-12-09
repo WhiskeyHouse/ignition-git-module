@@ -52,11 +52,25 @@ public class DesignerHook extends AbstractDesignerModuleHook {
 
         // Initialize RPC interface using new 8.3+ pattern
         // Get RPC interface via GatewayConnection using ProtoRpcSerializer
-        rpc = GatewayConnection.getRpcInterface(
-                ProtoRpcSerializer.DEFAULT_INSTANCE,
-                "com.axone_io.ignition.git",  // Module ID
-                GitScriptInterface.class
-        );
+        try {
+            rpc = GatewayConnection.getRpcInterface(
+                    ProtoRpcSerializer.DEFAULT_INSTANCE,
+                    "com.axone_io.ignition.git",  // Module ID
+                    GitScriptInterface.class
+            );
+
+            if (rpc == null) {
+                String errorMsg = "Failed to initialize Git module: RPC interface is null. " +
+                        "Unable to communicate with gateway. Ensure the Git gateway module is installed and running.";
+                logger.error(errorMsg);
+                throw new IllegalStateException(errorMsg);
+            }
+        } catch (Exception e) {
+            String errorMsg = "Failed to initialize Git module RPC interface: " + e.getMessage() +
+                    ". Unable to communicate with gateway. Ensure the Git gateway module is installed and running.";
+            logger.error(errorMsg, e);
+            throw new IllegalStateException(errorMsg, e);
+        }
 
         projectName = context.getProjectName();
 
@@ -133,9 +147,14 @@ public class DesignerHook extends AbstractDesignerModuleHook {
     }
 
     @Override
-    public void notifyProjectSaveStart(SaveContext save) throws Exception {
-        changes = context.getProject().getChanges();
-        super.notifyProjectSaveStart(save);
+    public void notifyProjectSaveStart(SaveContext save) {
+        try {
+            changes = context.getProject().getChanges();
+            super.notifyProjectSaveStart(save);
+        } catch (Exception e) {
+            logger.error("Error in notifyProjectSaveStart", e);
+            changes = null;
+        }
     }
 
     @Override

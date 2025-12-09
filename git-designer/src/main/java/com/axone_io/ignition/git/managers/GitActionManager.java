@@ -15,6 +15,7 @@ import com.inductiveautomation.ignition.common.resourcecollection.ResourceId;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 
 import javax.swing.*;
+import javax.swing.SwingWorker;
 import java.util.ArrayList;
 import java.util.List;
 import java.awt.Desktop;
@@ -77,6 +78,19 @@ public class GitActionManager {
         return data;
     }
 
+    private static Object[][] buildBranchTableData(List<BranchInfo> branches) {
+        Object[][] data = new Object[branches.size()][];
+        for (int i = 0; i < branches.size(); i++) {
+            BranchInfo branch = branches.get(i);
+            String currentMarker = branch.isCurrent() ? "★" : "";
+            String type = branch.isLocal() ? (branch.isRemote() ? "Local/Remote" : "Local") : "Remote";
+            String statusStr = branch.getStatusString();
+
+            data[i] = new Object[]{branch.getDisplayName(), currentMarker, type, statusStr};
+        }
+        return data;
+    }
+
 
     public static void showCommitPopup(String projectName, String userName) {
         Object[][] data = GitActionManager.getCommitPopupData(projectName, userName);
@@ -127,15 +141,28 @@ public class GitActionManager {
     }
 
     public static void showHistoryViewer(String projectName, String userName) {
-        try {
-            List<CommitInfo> commits = rpc.getCommitHistory(projectName, userName, 100);
-            new CommitHistoryViewer(commits, context.getFrame());
-        } catch (Exception e) {
-            logger.error("Error loading commit history", e);
-            JOptionPane.showMessageDialog(context.getFrame(),
-                    "Failed to load commit history: " + e.getMessage(),
-                    "Error", JOptionPane.ERROR_MESSAGE);
-        }
+        SwingWorker<List<CommitInfo>, Void> worker = new SwingWorker<List<CommitInfo>, Void>() {
+            @Override
+            protected List<CommitInfo> doInBackground() throws Exception {
+                return rpc.getCommitHistory(projectName, userName, 100);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    List<CommitInfo> commits = get();
+                    new CommitHistoryViewer(commits, context.getFrame());
+                } catch (Exception e) {
+                    logger.error("Error loading commit history", e);
+                    SwingUtilities.invokeLater(() -> {
+                        JOptionPane.showMessageDialog(context.getFrame(),
+                                "Failed to load commit history: " + e.getMessage(),
+                                "Error", JOptionPane.ERROR_MESSAGE);
+                    });
+                }
+            }
+        };
+        worker.execute();
     }
 
     public static void showBranchPopup(String projectName, String userName) {
@@ -148,16 +175,7 @@ public class GitActionManager {
             List<BranchInfo> branches = rpc.listBranches(projectName, userName);
             BranchStatus status = rpc.getBranchStatus(projectName, userName);
 
-            // Prepare data for table
-            Object[][] data = new Object[branches.size()][];
-            for (int i = 0; i < branches.size(); i++) {
-                BranchInfo branch = branches.get(i);
-                String currentMarker = branch.isCurrent() ? "★" : "";
-                String type = branch.isLocal() ? (branch.isRemote() ? "Local/Remote" : "Local") : "Remote";
-                String statusStr = branch.getStatusString();
-
-                data[i] = new Object[]{branch.getDisplayName(), currentMarker, type, statusStr};
-            }
+            Object[][] data = buildBranchTableData(branches);
 
             if (branchPopup != null) {
                 branchPopup.updateData(data, status);
@@ -243,15 +261,7 @@ public class GitActionManager {
             List<BranchInfo> branches = rpc.listBranches(projectName, userName);
             BranchStatus status = rpc.getBranchStatus(projectName, userName);
 
-            Object[][] data = new Object[branches.size()][];
-            for (int i = 0; i < branches.size(); i++) {
-                BranchInfo branch = branches.get(i);
-                String currentMarker = branch.isCurrent() ? "★" : "";
-                String type = branch.isLocal() ? (branch.isRemote() ? "Local/Remote" : "Local") : "Remote";
-                String statusStr = branch.getStatusString();
-
-                data[i] = new Object[]{branch.getDisplayName(), currentMarker, type, statusStr};
-            }
+            Object[][] data = buildBranchTableData(branches);
 
             if (branchPopup != null) {
                 branchPopup.updateData(data, status);

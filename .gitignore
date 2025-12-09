@@ -43,5 +43,14 @@ build/
 module-signer/
 node_modules
 
+# Code signing keystores
+*.jks
+*.keystore
+*.p12
+keystore.txt
+
 .DS_Store
 */.DS_Store
+
+# Claude Code local settings (contains machine-specific paths)
+.claude/
