@@ -30,6 +30,7 @@ interface State {
   error: string | null;
   editing: GitUserForm | null;
   isNew: boolean;
+  csrfToken: string | null;
 }
 
 export class GitUsersConfig extends Component<{}, State> {
@@ -41,12 +42,34 @@ export class GitUsersConfig extends Component<{}, State> {
       loading: true,
       error: null,
       editing: null,
-      isNew: false
+      isNew: false,
+      csrfToken: null
     };
   }
 
-  componentDidMount() {
-    this.loadData();
+  async componentDidMount() {
+    await this.loadCsrfToken();
+    await this.loadData();
+  }
+
+  async loadCsrfToken() {
+    try {
+      const response = await fetch('/data/git/csrf-token', {
+        credentials: 'same-origin',
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+      if (!response.ok) throw new Error('Failed to load CSRF token');
+      const data = await response.json();
+      this.setState({ csrfToken: data.csrfToken });
+    } catch (error) {
+      console.error('Error loading CSRF token:', error);
+      this.setState({
+        error: 'Failed to initialize security token. Please refresh the page.',
+        loading: false
+      });
+    }
   }
 
   async loadData() {
@@ -111,11 +134,20 @@ export class GitUsersConfig extends Component<{}, State> {
   handleDelete = async (id: number) => {
     if (!confirm('Are you sure you want to delete this user?')) return;
 
+    const { csrfToken } = this.state;
+    if (!csrfToken) {
+      alert('Security token not available. Please refresh the page.');
+      return;
+    }
+
     try {
       const response = await fetch(`/data/git/users/${id}`, {
         method: 'DELETE',
         credentials: 'same-origin',
-        headers: { 'Accept': 'application/json' }
+        headers: {
+          'Accept': 'application/json',
+          'X-CSRF-Token': csrfToken
+        }
       });
       if (!response.ok) throw new Error('Failed to delete user');
       await this.loadData();
@@ -125,7 +157,7 @@ export class GitUsersConfig extends Component<{}, State> {
   };
 
   handleSave = async () => {
-    const { editing, isNew } = this.state;
+    const { editing, isNew, csrfToken } = this.state;
     if (!editing) return;
 
     // Validation
@@ -140,6 +172,11 @@ export class GitUsersConfig extends Component<{}, State> {
       return;
     }
 
+    if (!csrfToken) {
+      alert('Security token not available. Please refresh the page.');
+      return;
+    }
+
     // For updates, only send password/sshKey if they were changed
     // If empty, the backend will preserve the existing values
     try {
@@ -151,7 +188,8 @@ export class GitUsersConfig extends Component<{}, State> {
         credentials: 'same-origin',
         headers: {
           'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          'Accept': 'application/json',
+          'X-CSRF-Token': csrfToken
         },
         body: JSON.stringify(editing)
       });
