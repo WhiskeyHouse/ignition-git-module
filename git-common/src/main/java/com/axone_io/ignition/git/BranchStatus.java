@@ -17,21 +17,39 @@ public class BranchStatus implements Serializable {
     private int unpushedCommits;
     private List<String> uncommittedFiles;
     private List<String> untrackedFiles;
+    private List<String> conflictingFiles;
     private String currentBranch;
+    private boolean isMerging;
 
     // Default constructor required for serialization
     public BranchStatus() {
         this.uncommittedFiles = new ArrayList<>();
         this.untrackedFiles = new ArrayList<>();
+        this.conflictingFiles = new ArrayList<>();
+        this.isMerging = false;
     }
 
     public BranchStatus(boolean hasUncommittedChanges, int unpushedCommits,
                        List<String> uncommittedFiles, List<String> untrackedFiles,
                        String currentBranch) {
+        this(hasUncommittedChanges, unpushedCommits, uncommittedFiles, untrackedFiles, new ArrayList<>(), false, currentBranch);
+    }
+
+    public BranchStatus(boolean hasUncommittedChanges, int unpushedCommits,
+                       List<String> uncommittedFiles, List<String> untrackedFiles,
+                       List<String> conflictingFiles, String currentBranch) {
+        this(hasUncommittedChanges, unpushedCommits, uncommittedFiles, untrackedFiles, conflictingFiles, false, currentBranch);
+    }
+
+    public BranchStatus(boolean hasUncommittedChanges, int unpushedCommits,
+                       List<String> uncommittedFiles, List<String> untrackedFiles,
+                       List<String> conflictingFiles, boolean isMerging, String currentBranch) {
         this.hasUncommittedChanges = hasUncommittedChanges;
         this.unpushedCommits = unpushedCommits;
         this.uncommittedFiles = uncommittedFiles != null ? uncommittedFiles : new ArrayList<>();
         this.untrackedFiles = untrackedFiles != null ? untrackedFiles : new ArrayList<>();
+        this.conflictingFiles = conflictingFiles != null ? conflictingFiles : new ArrayList<>();
+        this.isMerging = isMerging;
         this.currentBranch = currentBranch;
     }
 
@@ -75,11 +93,31 @@ public class BranchStatus implements Serializable {
         this.currentBranch = currentBranch;
     }
 
+    public List<String> getConflictingFiles() {
+        return conflictingFiles;
+    }
+
+    public void setConflictingFiles(List<String> conflictingFiles) {
+        this.conflictingFiles = conflictingFiles;
+    }
+
+    public boolean hasConflicts() {
+        return conflictingFiles != null && !conflictingFiles.isEmpty();
+    }
+
+    public boolean isMerging() {
+        return isMerging;
+    }
+
+    public void setMerging(boolean merging) {
+        isMerging = merging;
+    }
+
     /**
      * Returns true if there are any issues that should warn the user before switching branches.
      */
     public boolean hasWarnings() {
-        return hasUncommittedChanges || unpushedCommits > 0;
+        return hasUncommittedChanges || unpushedCommits > 0 || hasConflicts() || isMerging;
     }
 
     /**
@@ -88,8 +126,23 @@ public class BranchStatus implements Serializable {
     public String getWarningMessage() {
         StringBuilder message = new StringBuilder();
 
+        if (hasConflicts()) {
+            message.append("MERGE CONFLICTS: You have ").append(conflictingFiles.size())
+                   .append(" file(s) with unresolved merge conflicts.\n");
+            message.append("You must resolve these conflicts before committing.\n\n");
+
+            if (conflictingFiles.size() <= 10) {
+                for (String file : conflictingFiles) {
+                    message.append("  Conflict: ").append(file).append("\n");
+                }
+            }
+        }
+
         if (hasUncommittedChanges) {
             int totalFiles = uncommittedFiles.size() + untrackedFiles.size();
+            if (message.length() > 0) {
+                message.append("\n");
+            }
             message.append("You have ").append(totalFiles).append(" uncommitted file(s).\n");
 
             if (totalFiles <= 10) {

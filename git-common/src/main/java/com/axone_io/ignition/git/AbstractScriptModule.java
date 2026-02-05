@@ -94,8 +94,58 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
     public boolean switchBranch(String projectName,
                                 String userName,
                                 String branchName,
-                                boolean createNew) throws Exception {
-        return switchBranchImpl(projectName, userName, branchName, createNew);
+                                boolean createNew,
+                                boolean forceCheckout) throws Exception {
+        return switchBranchImpl(projectName, userName, branchName, createNew, forceCheckout);
+    }
+
+    @Override
+    public boolean stashChanges(String projectName,
+                                String userName,
+                                String message) throws Exception {
+        return stashChangesImpl(projectName, userName, message);
+    }
+
+    @Override
+    public boolean stashPop(String projectName,
+                            String userName) throws Exception {
+        return stashPopImpl(projectName, userName);
+    }
+
+    @Override
+    public boolean discardAllChanges(String projectName,
+                                     String userName) throws Exception {
+        return discardAllChangesImpl(projectName, userName);
+    }
+
+    @Override
+    public List<String> getConflictingFiles(String projectName) throws Exception {
+        return getConflictingFilesImpl(projectName);
+    }
+
+    @Override
+    public boolean resolveConflicts(String projectName,
+                                    String strategy) throws Exception {
+        return resolveConflictsImpl(projectName, strategy);
+    }
+
+    @Override
+    public boolean abortMerge(String projectName) throws Exception {
+        return abortMergeImpl(projectName);
+    }
+
+    @Override
+    public boolean hasConflicts(String projectName) throws Exception {
+        return hasConflictsImpl(projectName);
+    }
+
+    @Override
+    public boolean importResources(String projectName,
+                                   boolean importTags,
+                                   boolean importTheme,
+                                   boolean importImages,
+                                   String collisionPolicy) throws Exception {
+        return importResourcesImpl(projectName, importTags, importTheme, importImages, collisionPolicy);
     }
 
     protected abstract boolean pullImpl(String projectName, String userName, boolean importTags, boolean importTheme,
@@ -111,6 +161,14 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
     protected abstract boolean fetchFromRemoteImpl(String projectName, String userName) throws Exception;
     protected abstract String getCurrentBranchImpl(String projectName) throws Exception;
     protected abstract BranchStatus getBranchStatusImpl(String projectName, String userName) throws Exception;
-    protected abstract boolean switchBranchImpl(String projectName, String userName, String branchName, boolean createNew) throws Exception;
+    protected abstract boolean switchBranchImpl(String projectName, String userName, String branchName, boolean createNew, boolean forceCheckout) throws Exception;
+    protected abstract boolean stashChangesImpl(String projectName, String userName, String message) throws Exception;
+    protected abstract boolean stashPopImpl(String projectName, String userName) throws Exception;
+    protected abstract boolean discardAllChangesImpl(String projectName, String userName) throws Exception;
+    protected abstract List<String> getConflictingFilesImpl(String projectName) throws Exception;
+    protected abstract boolean resolveConflictsImpl(String projectName, String strategy) throws Exception;
+    protected abstract boolean abortMergeImpl(String projectName) throws Exception;
+    protected abstract boolean hasConflictsImpl(String projectName) throws Exception;
+    protected abstract boolean importResourcesImpl(String projectName, boolean importTags, boolean importTheme, boolean importImages, String collisionPolicy) throws Exception;
 
 }

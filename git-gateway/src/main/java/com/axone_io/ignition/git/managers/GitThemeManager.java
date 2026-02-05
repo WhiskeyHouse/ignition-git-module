@@ -19,6 +19,8 @@ public class GitThemeManager {
     private final static LoggerEx logger = LoggerEx.newBuilder().build(GitThemeManager.class);
 
     public static void importTheme(String projectName) {
+        logger.warn("Importing themes for project '" + projectName + "'. WARNING: This writes to the " +
+                "gateway-global themes directory and will affect ALL projects using the same themes.");
         Path dataDir = getDataFolderPath();
         Path projectDir = getProjectFolderPath(projectName);
         Path themesDir = dataDir.resolve("modules").resolve("com.inductiveautomation.perspective").resolve("themes");

@@ -1,23 +1,18 @@
 package com.axone_io.ignition.git;
 
 import com.inductiveautomation.ignition.designer.gui.CommonUI;
-import com.intellij.uiDesigner.core.GridConstraints;
-import com.intellij.uiDesigner.core.GridLayoutManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.imageio.ImageIO;
 import javax.swing.*;
+import javax.swing.border.EmptyBorder;
 import javax.swing.border.TitledBorder;
-import javax.swing.plaf.FontUIResource;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableRowSorter;
-import javax.swing.text.StyleContext;
 import java.awt.*;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.List;
-import java.util.Locale;
 
 public class BranchPopup extends JFrame {
     private final Logger logger = LoggerFactory.getLogger(getClass());
@@ -25,7 +20,6 @@ public class BranchPopup extends JFrame {
     private JTable branchesTable;
     private JTextField searchField;
     private JLabel searchLabel;
-    private JLabel branchesLabel;
     private JButton switchBtn;
     private JButton refreshBtn;
     private JButton cancelBtn;
@@ -33,6 +27,12 @@ public class BranchPopup extends JFrame {
     private JTextArea warningTextArea;
     private JCheckBox createNewCheckBox;
     private JTextField newBranchNameField;
+    private JCheckBox forceCheckoutCheckBox;
+    private JButton stashBtn;
+    private JButton discardBtn;
+    private JButton resolveOursBtn;
+    private JButton resolveTheirsBtn;
+    private JButton abortMergeBtn;
     private TableRowSorter<DefaultTableModel> rowSorter;
     private BranchStatus currentStatus;
 
@@ -49,20 +49,19 @@ public class BranchPopup extends JFrame {
 
         this.currentStatus = status;
 
+        // Build the UI using standard Swing layouts
+        setupUI();
+
         setContentPane(panel);
         setTitle("Switch Branch");
         setSize(600, 600);
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-        setVisible(true);
 
         branchesTable.setAutoResizeMode(JTable.AUTO_RESIZE_LAST_COLUMN);
         branchesTable.getTableHeader().setReorderingAllowed(false);
         branchesTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
 
-        // Setup search field
-        setupSearchField();
-
-        // Setup warning panel
+        // Setup warning panel visibility
         setupWarningPanel();
 
         // Set data
@@ -79,6 +78,8 @@ public class BranchPopup extends JFrame {
 
         // Switch button action
         switchBtn.addActionListener(e -> {
+            boolean forceCheckout = forceCheckoutCheckBox != null && forceCheckoutCheckBox.isSelected();
+
             if (createNewCheckBox.isSelected()) {
                 String newBranchName = newBranchNameField.getText().trim();
                 if (newBranchName.isEmpty()) {
@@ -88,7 +89,7 @@ public class BranchPopup extends JFrame {
                             JOptionPane.WARNING_MESSAGE);
                     return;
                 }
-                onSwitchBranch(newBranchName, true);
+                onSwitchBranch(newBranchName, true, forceCheckout);
             } else {
                 int selectedRow = branchesTable.getSelectedRow();
                 if (selectedRow == -1) {
@@ -112,7 +113,7 @@ public class BranchPopup extends JFrame {
                     return;
                 }
 
-                onSwitchBranch(branchName, false);
+                onSwitchBranch(branchName, false, forceCheckout);
             }
         });
 
@@ -123,39 +124,218 @@ public class BranchPopup extends JFrame {
         cancelBtn.addActionListener(e -> this.dispose());
 
         pack();
+        setVisible(true);
         CommonUI.centerComponent(this, parent);
         toFront();
     }
 
-    private void setupSearchField() {
+    private void setupUI() {
+        panel = new JPanel(new BorderLayout(5, 5));
+        panel.setBorder(new EmptyBorder(10, 10, 10, 10));
+        panel.setPreferredSize(new Dimension(600, 600));
+
+        // Top panel with label and search
+        JPanel topPanel = new JPanel(new BorderLayout(10, 0));
+        JLabel branchesLabel = new JLabel("Branches:");
+        branchesLabel.setFont(branchesLabel.getFont().deriveFont(Font.BOLD));
+        topPanel.add(branchesLabel, BorderLayout.WEST);
+
+        JPanel searchPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
         searchLabel = new JLabel("Search:");
-        searchLabel.setFont(searchLabel.getFont().deriveFont(Font.BOLD));
-        searchField = new JTextField(20);
+        searchField = new JTextField(15);
         searchField.setToolTipText("Filter branches by name");
-
-        GridLayoutManager layout = (GridLayoutManager) panel.getLayout();
-
-        JPanel searchPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
         searchPanel.add(searchLabel);
         searchPanel.add(searchField);
+        topPanel.add(searchPanel, BorderLayout.EAST);
 
-        panel.add(searchPanel, new GridConstraints(0, 1, 1, 1,
-                GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE,
-                GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW,
-                GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+        panel.add(topPanel, BorderLayout.NORTH);
+
+        // Center panel with table and warning
+        JPanel centerPanel = new JPanel(new BorderLayout(5, 5));
+
+        // Table
+        branchesTable = new JTable();
+        JScrollPane scrollPane = new JScrollPane(branchesTable);
+        scrollPane.setPreferredSize(new Dimension(-1, 300));
+        centerPanel.add(scrollPane, BorderLayout.CENTER);
+
+        // Warning panel (initially hidden)
+        warningPanel = new JPanel(new BorderLayout(5, 5));
+        warningPanel.setBorder(BorderFactory.createTitledBorder(
+                BorderFactory.createLineBorder(new Color(255, 193, 7)),
+                "⚠ Warning",
+                TitledBorder.DEFAULT_JUSTIFICATION,
+                TitledBorder.DEFAULT_POSITION,
+                null,
+                new Color(102, 60, 0)));
+        warningTextArea = new JTextArea(3, 40);
+        warningTextArea.setEditable(false);
+        warningTextArea.setLineWrap(true);
+        warningTextArea.setWrapStyleWord(true);
+        warningTextArea.setBackground(new Color(255, 243, 205));
+        warningTextArea.setForeground(new Color(102, 60, 0));
+        warningPanel.add(new JScrollPane(warningTextArea), BorderLayout.CENTER);
+        warningPanel.setVisible(false);
+        centerPanel.add(warningPanel, BorderLayout.SOUTH);
+
+        panel.add(centerPanel, BorderLayout.CENTER);
+
+        // Bottom panel with options and buttons
+        JPanel bottomPanel = new JPanel();
+        bottomPanel.setLayout(new BoxLayout(bottomPanel, BoxLayout.Y_AXIS));
+
+        // Create new branch option
+        JPanel newBranchPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 5));
+        createNewCheckBox = new JCheckBox("Create new branch:");
+        newBranchNameField = new JTextField(20);
+        newBranchPanel.add(createNewCheckBox);
+        newBranchPanel.add(newBranchNameField);
+        bottomPanel.add(newBranchPanel);
+
+        // Spacer
+        bottomPanel.add(Box.createVerticalStrut(10));
+
+        // Buttons panel
+        JPanel buttonsPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 5));
+
+        switchBtn = new JButton("Switch");
+        switchBtn.setBackground(new Color(76, 175, 80));
+        switchBtn.setForeground(Color.WHITE);
+        switchBtn.setOpaque(true);
+        switchBtn.setBorderPainted(false);
+        buttonsPanel.add(switchBtn);
+
+        refreshBtn = new JButton("Refresh");
+        buttonsPanel.add(refreshBtn);
+
+        cancelBtn = new JButton("Cancel");
+        buttonsPanel.add(cancelBtn);
+
+        bottomPanel.add(buttonsPanel);
+
+        panel.add(bottomPanel, BorderLayout.SOUTH);
     }
 
     private void setupWarningPanel() {
         if (currentStatus != null && currentStatus.hasWarnings()) {
             warningPanel.setVisible(true);
             warningTextArea.setText(currentStatus.getWarningMessage());
-            warningTextArea.setEditable(false);
-            warningTextArea.setBackground(new Color(255, 243, 205)); // Light yellow
-            warningTextArea.setForeground(new Color(102, 60, 0)); // Dark brown
-            warningTextArea.setLineWrap(true);
-            warningTextArea.setWrapStyleWord(true);
+
+            // Remove any existing action panel
+            for (Component comp : warningPanel.getComponents()) {
+                if (comp instanceof JPanel && !(comp instanceof JScrollPane)) {
+                    warningPanel.remove(comp);
+                }
+            }
+
+            // Create action panel with vertical layout for multiple rows
+            JPanel actionContainer = new JPanel();
+            actionContainer.setLayout(new BoxLayout(actionContainer, BoxLayout.Y_AXIS));
+
+            // Check if in merging state with conflicts
+            if (currentStatus.isMerging() && currentStatus.hasConflicts()) {
+                JPanel conflictPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 5));
+                conflictPanel.setBorder(BorderFactory.createTitledBorder("Resolve Merge Conflicts"));
+
+                resolveOursBtn = new JButton("Keep Ours");
+                resolveOursBtn.setToolTipText("Keep your local version for all conflicted files");
+                resolveOursBtn.addActionListener(e -> {
+                    int result = JOptionPane.showConfirmDialog(this,
+                            "This will resolve all conflicts by keeping YOUR version.\n" +
+                            "The incoming changes will be discarded.\n\n" +
+                            "Are you sure?",
+                            "Confirm Resolve - Keep Ours",
+                            JOptionPane.YES_NO_OPTION,
+                            JOptionPane.QUESTION_MESSAGE);
+                    if (result == JOptionPane.YES_OPTION) {
+                        onResolveConflicts("ours");
+                    }
+                });
+                conflictPanel.add(resolveOursBtn);
+
+                resolveTheirsBtn = new JButton("Accept Theirs");
+                resolveTheirsBtn.setToolTipText("Accept the incoming version for all conflicted files");
+                resolveTheirsBtn.addActionListener(e -> {
+                    int result = JOptionPane.showConfirmDialog(this,
+                            "This will resolve all conflicts by accepting INCOMING changes.\n" +
+                            "Your local changes will be discarded.\n\n" +
+                            "Are you sure?",
+                            "Confirm Resolve - Accept Theirs",
+                            JOptionPane.YES_NO_OPTION,
+                            JOptionPane.QUESTION_MESSAGE);
+                    if (result == JOptionPane.YES_OPTION) {
+                        onResolveConflicts("theirs");
+                    }
+                });
+                conflictPanel.add(resolveTheirsBtn);
+
+                abortMergeBtn = new JButton("Abort Merge");
+                abortMergeBtn.setToolTipText("Cancel the merge and return to the previous state");
+                abortMergeBtn.setForeground(new Color(180, 60, 60));
+                abortMergeBtn.addActionListener(e -> {
+                    int result = JOptionPane.showConfirmDialog(this,
+                            "This will abort the merge and reset to the previous state.\n" +
+                            "All merge changes will be lost.\n\n" +
+                            "Are you sure?",
+                            "Confirm Abort Merge",
+                            JOptionPane.YES_NO_OPTION,
+                            JOptionPane.WARNING_MESSAGE);
+                    if (result == JOptionPane.YES_OPTION) {
+                        onAbortMerge();
+                    }
+                });
+                conflictPanel.add(abortMergeBtn);
+
+                actionContainer.add(conflictPanel);
+            }
+
+            // Add action buttons for uncommitted changes (only if not just conflicts)
+            if (currentStatus.hasUncommittedChanges() || currentStatus.getUnpushedCommits() > 0) {
+                JPanel actionPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 5));
+
+                stashBtn = new JButton("Stash Changes");
+                stashBtn.setToolTipText("Save uncommitted changes to stash");
+                stashBtn.addActionListener(e -> {
+                    String message = JOptionPane.showInputDialog(this,
+                            "Enter stash message (optional):",
+                            "Stash Changes",
+                            JOptionPane.QUESTION_MESSAGE);
+                    if (message != null) { // User didn't cancel
+                        onStash(message);
+                    }
+                });
+                actionPanel.add(stashBtn);
+
+                discardBtn = new JButton("Discard All");
+                discardBtn.setToolTipText("Discard all uncommitted changes (cannot be undone!)");
+                discardBtn.setForeground(new Color(180, 60, 60));
+                discardBtn.addActionListener(e -> {
+                    int result = JOptionPane.showConfirmDialog(this,
+                            "This will permanently discard ALL uncommitted changes.\n" +
+                            "This action cannot be undone!\n\n" +
+                            "Are you sure you want to continue?",
+                            "Confirm Discard",
+                            JOptionPane.YES_NO_OPTION,
+                            JOptionPane.WARNING_MESSAGE);
+                    if (result == JOptionPane.YES_OPTION) {
+                        onDiscard();
+                    }
+                });
+                actionPanel.add(discardBtn);
+
+                // Add force checkout checkbox
+                forceCheckoutCheckBox = new JCheckBox("Force checkout");
+                forceCheckoutCheckBox.setToolTipText("Force checkout even if there are conflicting uncommitted changes");
+                actionPanel.add(forceCheckoutCheckBox);
+
+                actionContainer.add(actionPanel);
+            }
+
+            warningPanel.add(actionContainer, BorderLayout.SOUTH);
+            warningPanel.revalidate();
         } else {
             warningPanel.setVisible(false);
+            forceCheckoutCheckBox = null;
         }
     }
 
@@ -225,7 +405,7 @@ public class BranchPopup extends JFrame {
     }
 
     // Override methods - to be implemented by GitActionManager
-    public void onSwitchBranch(String branchName, boolean createNew) {
+    public void onSwitchBranch(String branchName, boolean createNew, boolean forceCheckout) {
         // Override in GitActionManager
     }
 
@@ -233,110 +413,19 @@ public class BranchPopup extends JFrame {
         // Override in GitActionManager
     }
 
-    {
-// GUI initializer generated by IntelliJ IDEA GUI Designer
-// >>> IMPORTANT!! <<<
-// DO NOT EDIT OR ADD ANY CODE HERE!
-        $$$setupUI$$$();
+    public void onStash(String message) {
+        // Override in GitActionManager
     }
 
-    /**
-     * Method generated by IntelliJ IDEA GUI Designer
-     * >>> IMPORTANT!! <<<
-     * DO NOT edit this method OR call it in your code!
-     *
-     * @noinspection ALL
-     */
-    private void $$$setupUI$$$() {
-        panel = new JPanel();
-        panel.setLayout(new GridLayoutManager(7, 2, new Insets(5, 5, 5, 5), -1, -1));
-        panel.setPreferredSize(new Dimension(600, 600));
-
-        // Branches label (row 0, col 0)
-        branchesLabel = new JLabel();
-        Font branchesLabelFont = this.$$$getFont$$$(null, Font.BOLD, -1, branchesLabel.getFont());
-        if (branchesLabelFont != null) branchesLabel.setFont(branchesLabelFont);
-        branchesLabel.setText("Branches:");
-        panel.add(branchesLabel, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
-
-        // Branches table scroll pane (row 1, col 0-1)
-        final JScrollPane scrollPane1 = new JScrollPane();
-        panel.add(scrollPane1, new GridConstraints(1, 0, 1, 2, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_WANT_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_WANT_GROW, null, new Dimension(-1, 250), null, 0, false));
-        branchesTable = new JTable();
-        scrollPane1.setViewportView(branchesTable);
-
-        // Warning panel (row 2, col 0-1)
-        warningPanel = new JPanel();
-        warningPanel.setLayout(new GridLayoutManager(1, 1, new Insets(5, 5, 5, 5), -1, -1));
-        panel.add(warningPanel, new GridConstraints(2, 0, 1, 2, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, null, new Dimension(-1, 100), null, 0, false));
-        warningPanel.setBorder(BorderFactory.createTitledBorder(BorderFactory.createLineBorder(new Color(-2987746)), "⚠ Warning", TitledBorder.DEFAULT_JUSTIFICATION, TitledBorder.DEFAULT_POSITION, null, null));
-
-        warningTextArea = new JTextArea();
-        warningTextArea.setEditable(false);
-        warningPanel.add(warningTextArea, new GridConstraints(0, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_BOTH, GridConstraints.SIZEPOLICY_WANT_GROW, GridConstraints.SIZEPOLICY_WANT_GROW, null, new Dimension(150, 50), null, 0, false));
-
-        // Create new branch checkbox (row 3, col 0-1)
-        createNewCheckBox = new JCheckBox();
-        createNewCheckBox.setText("Create new branch:");
-        panel.add(createNewCheckBox, new GridConstraints(3, 0, 1, 2, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
-
-        // New branch name field (row 4, col 0-1)
-        JLabel newBranchLabel = new JLabel();
-        newBranchLabel.setText("  Branch name:");
-        panel.add(newBranchLabel, new GridConstraints(4, 0, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_NONE, GridConstraints.SIZEPOLICY_FIXED, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
-
-        newBranchNameField = new JTextField();
-        panel.add(newBranchNameField, new GridConstraints(4, 1, 1, 1, GridConstraints.ANCHOR_WEST, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_WANT_GROW, GridConstraints.SIZEPOLICY_FIXED, null, new Dimension(150, -1), null, 0, false));
-
-        // Spacer (row 5)
-        final JPanel spacer = new JPanel();
-        panel.add(spacer, new GridConstraints(5, 0, 1, 2, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_VERTICAL, 1, GridConstraints.SIZEPOLICY_WANT_GROW, null, null, null, 0, false));
-
-        // Buttons (row 6, col 0-1)
-        switchBtn = new JButton();
-        switchBtn.setBackground(new Color(-11555609));
-        switchBtn.setForeground(new Color(-1));
-        switchBtn.setText("Switch");
-        panel.add(switchBtn, new GridConstraints(6, 0, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
-
-        JPanel buttonPanel = new JPanel(new GridLayout(1, 2, 5, 0));
-        refreshBtn = new JButton();
-        refreshBtn.setText("Refresh");
-        buttonPanel.add(refreshBtn);
-
-        cancelBtn = new JButton();
-        cancelBtn.setText("Cancel");
-        buttonPanel.add(cancelBtn);
-
-        panel.add(buttonPanel, new GridConstraints(6, 1, 1, 1, GridConstraints.ANCHOR_CENTER, GridConstraints.FILL_HORIZONTAL, GridConstraints.SIZEPOLICY_CAN_SHRINK | GridConstraints.SIZEPOLICY_CAN_GROW, GridConstraints.SIZEPOLICY_FIXED, null, null, null, 0, false));
+    public void onDiscard() {
+        // Override in GitActionManager
     }
 
-    /**
-     * @noinspection ALL
-     */
-    private Font $$$getFont$$$(String fontName, int style, int size, Font currentFont) {
-        if (currentFont == null) return null;
-        String resultName;
-        if (fontName == null) {
-            resultName = currentFont.getName();
-        } else {
-            Font testFont = new Font(fontName, Font.PLAIN, 10);
-            if (testFont.canDisplay('a') && testFont.canDisplay('1')) {
-                resultName = fontName;
-            } else {
-                resultName = currentFont.getName();
-            }
-        }
-        Font font = new Font(resultName, style >= 0 ? style : currentFont.getStyle(), size >= 0 ? size : currentFont.getSize());
-        boolean isMac = System.getProperty("os.name", "").toLowerCase(Locale.ENGLISH).startsWith("mac");
-        Font fontWithFallback = isMac ? new Font(font.getFamily(), font.getStyle(), font.getSize()) : new StyleContext().getFont(font.getFamily(), font.getStyle(), font.getSize());
-        return fontWithFallback instanceof FontUIResource ? fontWithFallback : new FontUIResource(fontWithFallback);
+    public void onResolveConflicts(String strategy) {
+        // Override in GitActionManager
     }
 
-    /**
-     * @noinspection ALL
-     */
-    public JComponent $$$getRootComponent$$$() {
-        return panel;
+    public void onAbortMerge() {
+        // Override in GitActionManager
     }
 }

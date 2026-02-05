@@ -148,6 +148,7 @@ public class RouteSecurityHelper {
     private static SecurityCheckResult checkAuthentication(RequestContext req) {
         try {
             HttpServletRequest httpReq = req.getRequest();
+            // Use getSession(false) first to check if session exists
             HttpSession session = httpReq.getSession(false);
 
             if (session == null) {
@@ -156,11 +157,14 @@ public class RouteSecurityHelper {
                 );
             }
 
-            // Check if session has a valid user attribute (Ignition sets this on login)
-            Object userAttr = session.getAttribute("user");
-            if (userAttr == null) {
+            // Require standard Ignition gateway authentication.
+            // The config pages are protected by Ignition's navigation model auth which
+            // sets the web-auth-request-collection session attribute on login.
+            Object webAuthCollection = session.getAttribute("web-auth-request-collection");
+
+            if (webAuthCollection == null) {
                 return SecurityCheckResult.unauthorized(
-                    "No authenticated user found in session. Please log in to the Gateway."
+                    "No authenticated session found. Please log in to the Gateway."
                 );
             }
 
@@ -211,10 +215,8 @@ public class RouteSecurityHelper {
             // Validate tokens match
             if (!requestToken.equals(sessionToken.toString())) {
                 String requestPath = httpReq.getRequestURI();
-                Object userAttr = session.getAttribute("user");
-                String userId = userAttr != null ? userAttr.toString() : "unknown";
-                logger.warn("CSRF token mismatch detected - Path: {}, User: {}, SessionId: {}",
-                    sanitizeForLogging(requestPath), sanitizeForLogging(userId), session.getId());
+                logger.warn("CSRF token mismatch detected - Path: {}, SessionId: {}",
+                    sanitizeForLogging(requestPath), session.getId());
                 return SecurityCheckResult.forbidden("Invalid CSRF token");
             }
 

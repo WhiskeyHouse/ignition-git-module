@@ -21,6 +21,20 @@ public interface GitScriptInterface {
     boolean fetchFromRemote(String projectName, String userName) throws Exception;
     String getCurrentBranch(String projectName) throws Exception;
     BranchStatus getBranchStatus(String projectName, String userName) throws Exception;
-    boolean switchBranch(String projectName, String userName, String branchName, boolean createNew) throws Exception;
+    boolean switchBranch(String projectName, String userName, String branchName, boolean createNew, boolean forceCheckout) throws Exception;
+
+    // Stash operations
+    boolean stashChanges(String projectName, String userName, String message) throws Exception;
+    boolean stashPop(String projectName, String userName) throws Exception;
+    boolean discardAllChanges(String projectName, String userName) throws Exception;
+
+    // Merge conflict operations
+    List<String> getConflictingFiles(String projectName) throws Exception;
+    boolean resolveConflicts(String projectName, String strategy) throws Exception;
+    boolean abortMerge(String projectName) throws Exception;
+    boolean hasConflicts(String projectName) throws Exception;
+
+    // Import resources from repo (without pull)
+    boolean importResources(String projectName, boolean importTags, boolean importTheme, boolean importImages, String collisionPolicy) throws Exception;
 
 }
