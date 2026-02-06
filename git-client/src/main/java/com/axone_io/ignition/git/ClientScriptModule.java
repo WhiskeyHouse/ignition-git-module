@@ -120,4 +120,9 @@ public class ClientScriptModule extends AbstractScriptModule {
     protected boolean importResourcesImpl(String projectName, boolean importTags, boolean importTheme, boolean importImages, String collisionPolicy) throws Exception {
         return rpc.importResources(projectName, importTags, importTheme, importImages, collisionPolicy);
     }
+
+    @Override
+    protected List<String> getGitTrackedProjectNamesImpl() {
+        return rpc.getGitTrackedProjectNames();
+    }
 }

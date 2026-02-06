@@ -2,118 +2,99 @@
 
 ## First-Time Setup
 
-### 1. Generate a Keystore
+### 1. Add Code Signing Secrets
 
 ```bash
+# Generate a keystore
 keytool -genkeypair \
   -alias ignition-git-module \
-  -keyalg RSA \
-  -keysize 2048 \
-  -validity 3650 \
+  -keyalg RSA -keysize 2048 -validity 3650 \
   -keystore keystore.jks
-```
 
-Follow the prompts to set:
-- Keystore password (keep secure!)
-- Key password (keep secure!)
-- Your organization details
-
-### 2. Set GitHub Secrets
-
-```bash
-# Encode keystore to base64
+# Encode to base64
 base64 -i keystore.jks -o keystore.txt
 ```
 
-Add these secrets in GitHub (Settings → Secrets and variables → Actions):
+Add these secrets in GitHub (Settings > Secrets and variables > Actions):
 - `KEYSTORE_BASE64` = contents of keystore.txt
-- `KEYSTORE_ALIAS` = `ignition-git-module` (or your chosen alias)
+- `KEYSTORE_ALIAS` = `ignition-git-module`
 - `KEYSTORE_STOREPASS` = your keystore password
 - `KEYSTORE_KEYPASS` = your key password
 
-### 3. Delete the keystore files locally
-
 ```bash
+# Clean up local files
 rm keystore.jks keystore.txt
 ```
 
+### 2. Add Release PAT
+
+Create a fine-grained Personal Access Token with `contents: write` permission, then add it as the `RELEASE_PAT` secret. This is needed so the tag push triggers the release build.
+
 ## Creating a Release
 
-### Quick Method (Recommended)
+### Stable Release
+
+1. Go to **Actions > Create Release > Run workflow**
+2. Pick `bump_type`: `patch`, `minor`, or `major`
+3. Click **Run workflow**
+
+### Pre-release
+
+1. Go to **Actions > Create Release > Run workflow**
+2. Set `bump_type` to `prerelease`
+3. Pick `prerelease_type`: `alpha`, `beta`, or `rc`
+4. Click **Run workflow**
+
+### Promote Pre-release to Stable
+
+1. Run **Create Release** with `bump_type: patch`
+2. The pre-release suffix is stripped (e.g., `2.1.0-rc.1` becomes `2.1.0`)
+
+### Dry Run
+
+Check `dry_run` to preview the version change without pushing anything.
+
+## Version Examples
+
+| Current | Bump | Pre-release | Result |
+|---------|------|-------------|--------|
+| `2.0.0` | patch | - | `2.0.1` |
+| `2.0.0` | minor | - | `2.1.0` |
+| `2.0.0` | prerelease | beta | `2.1.0-beta.1` |
+| `2.1.0-beta.1` | prerelease | beta | `2.1.0-beta.2` |
+| `2.1.0-beta.2` | prerelease | rc | `2.1.0-rc.1` |
+| `2.1.0-rc.1` | patch | - | `2.1.0` |
+
+## What Happens
+
+1. **Create Release** bumps versions in pom.xml + package.json, commits, tags, pushes
+2. **Release** (triggered by the tag) builds the module, signs it, creates a GitHub Release
+3. Pre-releases get the **Pre-release** badge on GitHub
+
+## Local Builds
 
 ```bash
-# 1. Update version in pom.xml (e.g., change to 2.1.0)
-# 2. Commit and push
-git add pom.xml
-git commit -m "chore: bump version to 2.1.0"
-git push origin main
+# Unsigned (fast)
+mvn clean package -DskipTests
 
-# 3. Tag and push
-git tag v2.1.0
-git push origin v2.1.0
-```
-
-GitHub Actions will automatically:
-- ✅ Build the module
-- ✅ Sign the module
-- ✅ Create a GitHub release
-- ✅ Upload signed and unsigned .modl files
-
-### Manual Trigger
-
-1. Go to GitHub → Actions → "Build and Release"
-2. Click "Run workflow"
-3. Select branch and release type
-4. Click "Run workflow"
-
-## Local Development Builds
-
-### Unsigned Build (Fast)
-```bash
-mvn clean package
-```
-
-### Signed Build (Local Testing)
-```bash
+# Signed
 mvn clean package -Psign \
   -Dkeystore.path=/path/to/keystore.jks \
   -Dkeystore.alias=ignition-git-module \
-  -Dkeystore.storepass=YOUR_PASSWORD \
-  -Dkeystore.keypass=YOUR_PASSWORD
-```
+  -Dkeystore.storepass=PASSWORD \
+  -Dkeystore.keypass=PASSWORD
 
-### Verify Signature
-```bash
+# Verify
 jarsigner -verify -verbose git-build/target/*.modl
 ```
 
 ## Troubleshooting
 
-### "KEYSTORE_BASE64 secret not found"
-→ Set up GitHub secrets (see step 2 above)
-
-### "jar verify failed"
-→ Check keystore passwords in GitHub secrets
-
-### "Module not found in release"
-→ Check GitHub Actions logs for build errors
-
-## Where to Find Files
-
-- Built module: `git-build/target/*.modl`
-- GitHub releases: https://github.com/WHK01/ignition-git-module/releases
-- Workflow logs: https://github.com/WHK01/ignition-git-module/actions
-
-## Version Numbering
-
-Follow semantic versioning:
-- **Major** (X.0.0): Breaking changes
-- **Minor** (0.X.0): New features
-- **Patch** (0.0.X): Bug fixes
-
-Examples:
-- `2.0.0` → `2.1.0` (added new feature)
-- `2.1.0` → `2.1.1` (bug fix)
-- `2.1.1` → `3.0.0` (breaking change)
+| Problem | Fix |
+|---------|-----|
+| Release workflow not triggered | Check `RELEASE_PAT` secret is set and not expired |
+| POM version mismatch | Run Create Release workflow instead of manual tagging |
+| Module not signed | Check all 4 keystore secrets are configured |
+| npm build fails | Ensure Node.js 18+ is available |
 
 For complete documentation, see [../RELEASE.md](../RELEASE.md)

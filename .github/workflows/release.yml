@@ -1,27 +1,18 @@
-name: Build and Release
+name: Release
 
 on:
   push:
     tags:
-      - 'v*.*.*'
-  workflow_dispatch:
-    inputs:
-      release_type:
-        description: 'Release type'
-        required: true
-        default: 'snapshot'
-        type: choice
-        options:
-          - snapshot
-          - release
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
 
 env:
   JAVA_VERSION: '17'
   NODE_VERSION: '18'
 
 jobs:
-  build:
-    name: Build Ignition Git Module
+  release:
+    name: Build, Sign & Publish
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -30,6 +21,26 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Determine version info
+        id: version
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "tag_version=$TAG_VERSION" >> $GITHUB_OUTPUT
+
+          # Detect pre-release: contains a hyphen after the version triplet
+          if [[ "$TAG_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-.+ ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+            echo "Detected pre-release: $TAG_VERSION"
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+            echo "Detected stable release: $TAG_VERSION"
+          fi
+
+          # Extract base version (strip pre-release suffix) for Ignition module version
+          BASE_VERSION=$(echo "$TAG_VERSION" | sed 's/-.*//')
+          echo "base_version=$BASE_VERSION" >> $GITHUB_OUTPUT
+          echo "Base version for Ignition: $BASE_VERSION"
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
@@ -43,23 +54,31 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Determine version
-        id: version
+      - name: Verify POM version matches tag
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/v}
-            echo "version=$VERSION" >> $GITHUB_OUTPUT
-            echo "is_release=true" >> $GITHUB_OUTPUT
-          else
-            # Use POM version for snapshots
-            VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
-            echo "version=$VERSION-SNAPSHOT" >> $GITHUB_OUTPUT
-            echo "is_release=false" >> $GITHUB_OUTPUT
+          POM_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          TAG_VERSION="${{ steps.version.outputs.tag_version }}"
+          if [ "$POM_VERSION" != "$TAG_VERSION" ]; then
+            echo "Error: POM version ($POM_VERSION) does not match tag version ($TAG_VERSION)"
+            echo "Did you forget to run the create-release workflow?"
+            exit 1
           fi
+          echo "POM version matches tag: $POM_VERSION"
 
-      - name: Build unsigned module
+      - name: Compute Ignition module version
+        id: module_version
         run: |
-          mvn clean package -DskipTests
+          # Ignition requires 4-part MAJOR.MINOR.PATCH.BUILD format
+          # Strip pre-release suffix and append build timestamp
+          BASE="${{ steps.version.outputs.base_version }}"
+          TIMESTAMP=$(date -u +"%Y%m%d%H")
+          MODULE_VERSION="${BASE}.${TIMESTAMP}"
+          echo "module_version=$MODULE_VERSION" >> $GITHUB_OUTPUT
+          echo "Ignition module version: $MODULE_VERSION"
+
+      - name: Build module
+        run: |
+          mvn clean package -DskipTests -Dmodule.version=${{ steps.module_version.outputs.module_version }}
         env:
           JAVA_HOME: ${{ env.JAVA_HOME }}
 
@@ -68,21 +87,21 @@ jobs:
           cd git-build/target
           MODL_FILE=$(ls *.modl | head -1)
           if [ -n "$MODL_FILE" ]; then
-            cp "$MODL_FILE" "Git-${{ steps.version.outputs.version }}-unsigned.modl"
-            echo "Preserved unsigned module: Git-${{ steps.version.outputs.version }}-unsigned.modl"
-            ls -lh "Git-${{ steps.version.outputs.version }}-unsigned.modl"
+            cp "$MODL_FILE" "Git-${{ steps.version.outputs.tag_version }}-unsigned.modl"
+            echo "Preserved unsigned module: Git-${{ steps.version.outputs.tag_version }}-unsigned.modl"
+            ls -lh "Git-${{ steps.version.outputs.tag_version }}-unsigned.modl"
           else
             echo "Error: No .modl file found"
             exit 1
           fi
 
       - name: Decode keystore
-        if: steps.version.outputs.is_release == 'true' && secrets.KEYSTORE_BASE64 != ''
+        if: secrets.KEYSTORE_BASE64 != ''
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > ${{ runner.temp }}/keystore.jks
 
       - name: Sign module
-        if: steps.version.outputs.is_release == 'true' && secrets.KEYSTORE_BASE64 != ''
+        if: secrets.KEYSTORE_BASE64 != ''
         run: |
           cd git-build/target
           MODL_FILE=$(ls *.modl | grep -v "unsigned" | head -1)
@@ -102,7 +121,7 @@ jobs:
           JAVA_HOME: ${{ env.JAVA_HOME }}
 
       - name: Verify signed module
-        if: steps.version.outputs.is_release == 'true' && secrets.KEYSTORE_BASE64 != ''
+        if: secrets.KEYSTORE_BASE64 != ''
         run: |
           cd git-build/target
           MODL_FILE=$(ls *.modl | grep -v "unsigned" | head -1)
@@ -112,78 +131,31 @@ jobs:
           fi
 
       - name: Rename signed module
-        if: steps.version.outputs.is_release == 'true' && secrets.KEYSTORE_BASE64 != ''
+        if: secrets.KEYSTORE_BASE64 != ''
         run: |
           cd git-build/target
           MODL_FILE=$(ls *.modl | grep -v "unsigned" | head -1)
           if [ -n "$MODL_FILE" ]; then
-            mv "$MODL_FILE" "Git-${{ steps.version.outputs.version }}-signed.modl"
-            echo "Renamed signed module: Git-${{ steps.version.outputs.version }}-signed.modl"
+            mv "$MODL_FILE" "Git-${{ steps.version.outputs.tag_version }}-signed.modl"
+            echo "Renamed signed module: Git-${{ steps.version.outputs.tag_version }}-signed.modl"
             ls -lh Git-*.modl
           fi
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ignition-git-module-${{ steps.version.outputs.version }}
-          path: git-build/target/Git-${{ steps.version.outputs.version }}-*.modl
-          retention-days: 30
-
-      - name: Prepare release notes
-        if: steps.version.outputs.is_release == 'true'
-        id: release_notes
-        run: |
-          if [ -f "git-build/target/Git-${{ steps.version.outputs.version }}-signed.modl" ]; then
-            cat << 'EOF' > release_notes.md
-          ## Ignition Git Module v${{ steps.version.outputs.version }}
-
-          ### Installation
-          1. Download the `.modl` file below
-          2. Install via Ignition Gateway Config > System > Modules
-          3. Restart the gateway if prompted
-
-          ### Files
-          - `Git-${{ steps.version.outputs.version }}-signed.modl` - Signed module (recommended for production)
-          - `Git-${{ steps.version.outputs.version }}-unsigned.modl` - Unsigned module (for testing)
-
-          ### Compatibility
-          - Requires Ignition 8.3.1 or later
-          - Requires Java 17+
-
-          For version 8.1.x support, see [v1.0.3-ignition-8.1](https://github.com/WHK01/ignition-git-module/releases/tag/v1.0.3-ignition-8.1)
-          EOF
-          else
-            cat << 'EOF' > release_notes.md
-          ## Ignition Git Module v${{ steps.version.outputs.version }}
-
-          ### Installation
-          1. Download the `.modl` file below
-          2. Install via Ignition Gateway Config > System > Modules
-          3. Restart the gateway if prompted
-
-          ### Files
-          - `Git-${{ steps.version.outputs.version }}-unsigned.modl` - Unsigned module
-
-          **Note:** This release does not include a signed version. Configure signing secrets to enable module signing.
-
-          ### Compatibility
-          - Requires Ignition 8.3.1 or later
-          - Requires Java 17+
-
-          For version 8.1.x support, see [v1.0.3-ignition-8.1](https://github.com/WHK01/ignition-git-module/releases/tag/v1.0.3-ignition-8.1)
-          EOF
-          fi
+          name: ignition-git-module-${{ steps.version.outputs.tag_version }}
+          path: git-build/target/Git-${{ steps.version.outputs.tag_version }}-*.modl
+          retention-days: 90
 
       - name: Create GitHub Release
-        if: steps.version.outputs.is_release == 'true'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.version.outputs.is_prerelease }}
           generate_release_notes: true
           files: |
-            git-build/target/Git-${{ steps.version.outputs.version }}-*.modl
-          body_path: release_notes.md
+            git-build/target/Git-${{ steps.version.outputs.tag_version }}-*.modl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

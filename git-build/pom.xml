@@ -20,6 +20,9 @@
         <maven.build.timestamp.format>yyyyMMddHH</maven.build.timestamp.format>
         <!-- Path to gateway web components -->
         <gateway.web.dir>${project.basedir}/../web/packages/gateway</gateway.web.dir>
+        <!-- Ignition module version: MAJOR.MINOR.PATCH.BUILD (4-part format required by Ignition) -->
+        <!-- CI can override with -Dmodule.version=X.Y.Z.BUILD to strip pre-release suffixes -->
+        <module.version>${project.parent.version}.${maven.build.timestamp}</module.version>
     </properties>
 
     <dependencies>
@@ -126,7 +129,7 @@
                     <moduleId>com.axone_io.ignition.git</moduleId>
                     <moduleName>${module-name}</moduleName>
                     <moduleDescription>${module-description}</moduleDescription>
-                    <moduleVersion>${project.parent.version}.${maven.build.timestamp}</moduleVersion>
+                    <moduleVersion>${module.version}</moduleVersion>
                     <requiredIgnitionVersion>${ignition-platform-version}</requiredIgnitionVersion>
                     <licenseFile>license.html</licenseFile>
 

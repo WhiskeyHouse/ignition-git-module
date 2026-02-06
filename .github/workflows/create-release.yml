@@ -1,0 +1,184 @@
+name: Create Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - prerelease
+      prerelease_type:
+        description: 'Pre-release type (only used when bump_type is prerelease)'
+        required: false
+        type: choice
+        default: 'beta'
+        options:
+          - alpha
+          - beta
+          - rc
+      dry_run:
+        description: 'Dry run (show what would happen without pushing)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  bump-version:
+    name: Bump Version & Tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.RELEASE_PAT }}
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Set up Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Read current version
+        id: current
+        run: |
+          CURRENT_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $CURRENT_VERSION"
+
+      - name: Calculate new version
+        id: new_version
+        env:
+          BUMP_TYPE: ${{ inputs.bump_type }}
+          PRERELEASE_TYPE: ${{ inputs.prerelease_type }}
+          CURRENT_VERSION: ${{ steps.current.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # Parse current version
+          # Handles: 2.0.0, 2.1.0-beta.1, 2.1.0-rc.2
+          if [[ "$CURRENT_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-([a-zA-Z]+)\.([0-9]+))?$ ]]; then
+            MAJOR="${BASH_REMATCH[1]}"
+            MINOR="${BASH_REMATCH[2]}"
+            PATCH="${BASH_REMATCH[3]}"
+            PRE_TYPE="${BASH_REMATCH[5]}"
+            PRE_NUM="${BASH_REMATCH[6]}"
+          else
+            echo "Error: Cannot parse version '$CURRENT_VERSION'"
+            exit 1
+          fi
+
+          IS_PRERELEASE=false
+          if [ -n "$PRE_TYPE" ]; then
+            IS_PRERELEASE=true
+          fi
+
+          echo "Parsed: MAJOR=$MAJOR MINOR=$MINOR PATCH=$PATCH PRE_TYPE=$PRE_TYPE PRE_NUM=$PRE_NUM"
+          echo "Current is pre-release: $IS_PRERELEASE"
+
+          case "$BUMP_TYPE" in
+            major)
+              NEW_VERSION="$((MAJOR + 1)).0.0"
+              ;;
+            minor)
+              if [ "$IS_PRERELEASE" = true ]; then
+                # Promoting from pre-release: if pre-release was on this minor, just use it
+                NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+              else
+                NEW_VERSION="${MAJOR}.$((MINOR + 1)).0"
+              fi
+              ;;
+            patch)
+              if [ "$IS_PRERELEASE" = true ]; then
+                # Promoting pre-release to stable: 2.1.0-beta.1 -> 2.1.0
+                NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+              else
+                NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+              fi
+              ;;
+            prerelease)
+              if [ "$IS_PRERELEASE" = true ]; then
+                if [ "$PRE_TYPE" = "$PRERELEASE_TYPE" ]; then
+                  # Same pre-release type: increment number
+                  # 2.1.0-beta.1 -> 2.1.0-beta.2
+                  NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}-${PRERELEASE_TYPE}.$((PRE_NUM + 1))"
+                else
+                  # Different pre-release type: start at 1
+                  # 2.1.0-beta.2 -> 2.1.0-rc.1
+                  NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}-${PRERELEASE_TYPE}.1"
+                fi
+              else
+                # From stable: bump minor and start pre-release
+                # 2.0.0 -> 2.1.0-beta.1
+                NEW_VERSION="${MAJOR}.$((MINOR + 1)).0-${PRERELEASE_TYPE}.1"
+              fi
+              ;;
+            *)
+              echo "Error: Unknown bump type '$BUMP_TYPE'"
+              exit 1
+              ;;
+          esac
+
+          echo "New version: $NEW_VERSION"
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Update Maven versions
+        if: ${{ !inputs.dry_run }}
+        run: |
+          mvn versions:set -DnewVersion=${{ steps.new_version.outputs.version }} -DgenerateBackupPoms=false
+          echo "Updated pom.xml files to ${{ steps.new_version.outputs.version }}"
+
+      - name: Update npm package version
+        if: ${{ !inputs.dry_run }}
+        working-directory: web/packages/gateway
+        run: |
+          npm version "${{ steps.new_version.outputs.version }}" --no-git-tag-version --allow-same-version
+          echo "Updated package.json to ${{ steps.new_version.outputs.version }}"
+
+      - name: Show changes (dry run)
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "============================================"
+          echo "DRY RUN - No changes will be made"
+          echo "============================================"
+          echo ""
+          echo "Current version: ${{ steps.current.outputs.version }}"
+          echo "New version:     ${{ steps.new_version.outputs.version }}"
+          echo "Bump type:       ${{ inputs.bump_type }}"
+          echo "Pre-release:     ${{ inputs.prerelease_type }}"
+          echo "Tag:             v${{ steps.new_version.outputs.version }}"
+          echo ""
+          echo "Actions that would be taken:"
+          echo "  1. Update all pom.xml files to ${{ steps.new_version.outputs.version }}"
+          echo "  2. Update web/packages/gateway/package.json to ${{ steps.new_version.outputs.version }}"
+          echo "  3. Commit: 'chore(release): ${{ steps.new_version.outputs.version }}'"
+          echo "  4. Tag: v${{ steps.new_version.outputs.version }}"
+          echo "  5. Push commit and tag to main"
+          echo "  6. release.yml will trigger to build, sign, and publish"
+
+      - name: Commit, tag, and push
+        if: ${{ !inputs.dry_run }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+          git commit -m "chore(release): ${{ steps.new_version.outputs.version }}"
+          git tag "v${{ steps.new_version.outputs.version }}"
+          git push origin main --follow-tags
+
+          echo "Pushed v${{ steps.new_version.outputs.version }} - release.yml will now build and publish"
