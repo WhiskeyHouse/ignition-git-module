@@ -167,7 +167,7 @@ jobs:
           echo "  2. Update web/packages/gateway/package.json to ${{ steps.new_version.outputs.version }}"
           echo "  3. Commit: 'chore(release): ${{ steps.new_version.outputs.version }}'"
           echo "  4. Tag: v${{ steps.new_version.outputs.version }}"
-          echo "  5. Push commit and tag to main"
+          echo "  5. Push commit and tag to default branch"
           echo "  6. release.yml will trigger to build, sign, and publish"
 
       - name: Commit, tag, and push
@@ -179,6 +179,6 @@ jobs:
           git add -A
           git commit -m "chore(release): ${{ steps.new_version.outputs.version }}"
           git tag "v${{ steps.new_version.outputs.version }}"
-          git push origin main --follow-tags
+          git push origin ${{ github.event.repository.default_branch }} --follow-tags
 
           echo "Pushed v${{ steps.new_version.outputs.version }} - release.yml will now build and publish"

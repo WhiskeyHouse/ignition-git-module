@@ -17,6 +17,8 @@ jobs:
     permissions:
       contents: write
       packages: write
+    env:
+      HAS_KEYSTORE: ${{ secrets.KEYSTORE_BASE64 != '' }}
 
     steps:
       - name: Checkout code
@@ -37,10 +39,7 @@ jobs:
             echo "Detected stable release: $TAG_VERSION"
           fi
 
-          # Extract base version (strip pre-release suffix) for Ignition module version
-          BASE_VERSION=$(echo "$TAG_VERSION" | sed 's/-.*//')
-          echo "base_version=$BASE_VERSION" >> $GITHUB_OUTPUT
-          echo "Base version for Ignition: $BASE_VERSION"
+          echo "Tag version for module: $TAG_VERSION"
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
@@ -65,20 +64,9 @@ jobs:
           fi
           echo "POM version matches tag: $POM_VERSION"
 
-      - name: Compute Ignition module version
-        id: module_version
-        run: |
-          # Ignition requires 4-part MAJOR.MINOR.PATCH.BUILD format
-          # Strip pre-release suffix and append build timestamp
-          BASE="${{ steps.version.outputs.base_version }}"
-          TIMESTAMP=$(date -u +"%Y%m%d%H")
-          MODULE_VERSION="${BASE}.${TIMESTAMP}"
-          echo "module_version=$MODULE_VERSION" >> $GITHUB_OUTPUT
-          echo "Ignition module version: $MODULE_VERSION"
-
       - name: Build module
         run: |
-          mvn clean package -DskipTests -Dmodule.version=${{ steps.module_version.outputs.module_version }}
+          mvn clean package -DskipTests -Dmodule.version=${{ steps.version.outputs.tag_version }}
         env:
           JAVA_HOME: ${{ env.JAVA_HOME }}
 
@@ -96,12 +84,12 @@ jobs:
           fi
 
       - name: Decode keystore
-        if: secrets.KEYSTORE_BASE64 != ''
+        if: env.HAS_KEYSTORE == 'true'
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > ${{ runner.temp }}/keystore.jks
 
       - name: Sign module
-        if: secrets.KEYSTORE_BASE64 != ''
+        if: env.HAS_KEYSTORE == 'true'
         run: |
           cd git-build/target
           MODL_FILE=$(ls *.modl | grep -v "unsigned" | head -1)
@@ -121,7 +109,7 @@ jobs:
           JAVA_HOME: ${{ env.JAVA_HOME }}
 
       - name: Verify signed module
-        if: secrets.KEYSTORE_BASE64 != ''
+        if: env.HAS_KEYSTORE == 'true'
         run: |
           cd git-build/target
           MODL_FILE=$(ls *.modl | grep -v "unsigned" | head -1)
@@ -131,7 +119,7 @@ jobs:
           fi
 
       - name: Rename signed module
-        if: secrets.KEYSTORE_BASE64 != ''
+        if: env.HAS_KEYSTORE == 'true'
         run: |
           cd git-build/target
           MODL_FILE=$(ls *.modl | grep -v "unsigned" | head -1)
@@ -160,6 +148,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Clean up keystore
-        if: always() && secrets.KEYSTORE_BASE64 != ''
+        if: always() && env.HAS_KEYSTORE == 'true'
         run: |
           rm -f ${{ runner.temp }}/keystore.jks

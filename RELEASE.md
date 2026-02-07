@@ -70,7 +70,7 @@ The workflow will:
 ### Pre-release
 
 1. Go to **Actions > Create Release > Run workflow**
-2. Set `bump_type` to `prerelease`
+2. Set `bump_type` to `prerelease` (no hyphen in the input value)
 3. Set `prerelease_type` to `alpha`, `beta`, or `rc`
 4. Click **Run workflow**
 
@@ -103,13 +103,9 @@ Set `dry_run: true` to preview what the workflow would do without making any cha
 
 ## Ignition Module Versioning
 
-Ignition requires a 4-part `MAJOR.MINOR.PATCH.BUILD` module version and cannot parse SemVer pre-release suffixes. The Release workflow handles this by:
+Per the [Ignition SDK docs](https://www.sdk-docs.inductiveautomation.com/docs/getting-started/anatomy-of-a-module/the-modulexml-file), module versions use the format `major.minor.revision[-rcX][-betaX]` (e.g., `2.1.0`, `2.1.0-rc1`, `2.1.0-beta2`).
 
-1. Stripping the pre-release suffix from the tag version
-2. Appending a UTC build timestamp
-3. Passing it to Maven via `-Dmodule.version=X.Y.Z.YYYYMMDDHH`
-
-Example: Tag `v2.1.0-beta.1` produces Ignition module version `2.1.0.2026020614`.
+The Release workflow passes the tag version to Maven via `-Dmodule.version`, which sets the `<moduleVersion>` in the built module.
 
 ## Build Artifacts
 

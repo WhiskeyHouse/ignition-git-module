@@ -41,7 +41,7 @@ Create a fine-grained Personal Access Token with `contents: write` permission, t
 ### Pre-release
 
 1. Go to **Actions > Create Release > Run workflow**
-2. Set `bump_type` to `prerelease`
+2. Set `bump_type` to `prerelease` (no hyphen in the input value)
 3. Pick `prerelease_type`: `alpha`, `beta`, or `rc`
 4. Click **Run workflow**
 

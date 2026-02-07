@@ -17,12 +17,11 @@
             UTC+2
         </timeZone>
         <locale>fr_FR</locale>
-        <maven.build.timestamp.format>yyyyMMddHH</maven.build.timestamp.format>
         <!-- Path to gateway web components -->
         <gateway.web.dir>${project.basedir}/../web/packages/gateway</gateway.web.dir>
-        <!-- Ignition module version: MAJOR.MINOR.PATCH.BUILD (4-part format required by Ignition) -->
-        <!-- CI can override with -Dmodule.version=X.Y.Z.BUILD to strip pre-release suffixes -->
-        <module.version>${project.parent.version}.${maven.build.timestamp}</module.version>
+        <!-- Ignition module version: major.minor.revision[-rcX][-betaX] per SDK docs -->
+        <!-- CI can override with -Dmodule.version=X.Y.Z -->
+        <module.version>${project.parent.version}</module.version>
     </properties>
 
     <dependencies>
