@@ -74,16 +74,16 @@ The workflow will:
 3. Set `prerelease_type` to `alpha`, `beta`, or `rc`
 4. Click **Run workflow**
 
-Pre-release versions follow the pattern `X.Y.Z-type.N` (e.g., `2.1.0-beta.1`).
+Pre-release versions follow the pattern `X.Y.Z-typeN` (e.g., `2.1.0-beta1`).
 
 The GitHub Release will be marked with the **Pre-release** badge.
 
 ### Promoting a Pre-release to Stable
 
-To promote a pre-release (e.g., `2.1.0-rc.2`) to a stable release:
+To promote a pre-release (e.g., `2.1.0-rc2`) to a stable release:
 
 1. Run **Create Release** with `bump_type: patch`
-2. This strips the pre-release suffix: `2.1.0-rc.2` becomes `2.1.0`
+2. This strips the pre-release suffix: `2.1.0-rc2` becomes `2.1.0`
 
 ### Dry Run
 
@@ -96,10 +96,10 @@ Set `dry_run: true` to preview what the workflow would do without making any cha
 | `2.0.0` | patch | - | `2.0.1` |
 | `2.0.0` | minor | - | `2.1.0` |
 | `2.0.0` | major | - | `3.0.0` |
-| `2.0.0` | prerelease | beta | `2.1.0-beta.1` |
-| `2.1.0-beta.1` | prerelease | beta | `2.1.0-beta.2` |
-| `2.1.0-beta.2` | prerelease | rc | `2.1.0-rc.1` |
-| `2.1.0-rc.1` | patch | - | `2.1.0` |
+| `2.0.0` | prerelease | beta | `2.1.0-beta1` |
+| `2.1.0-beta1` | prerelease | beta | `2.1.0-beta2` |
+| `2.1.0-beta2` | prerelease | rc | `2.1.0-rc1` |
+| `2.1.0-rc1` | patch | - | `2.1.0` |
 
 ## Ignition Module Versioning
 

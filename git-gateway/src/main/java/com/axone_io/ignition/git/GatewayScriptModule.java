@@ -116,14 +116,28 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     @Override
     protected boolean commitImpl(String projectName, String userName, String[] changes, String message) {
         try (Git git = getGit(getProjectFolderPath(projectName))) {
-            AddCommand addCommand = git.add();
-            AddCommand updateCommand = git.add().setUpdate(true);
-            for (String change : changes) {
-                addCommand.addFilepattern(change);
-                updateCommand.addFilepattern(change);
+            if (changes != null && changes.length > 0) {
+                AddCommand addCommand = git.add();
+                AddCommand updateCommand = git.add().setUpdate(true);
+                boolean hasValidPattern = false;
+                for (String change : changes) {
+                    if (change != null && !change.isEmpty()) {
+                        addCommand.addFilepattern(change);
+                        updateCommand.addFilepattern(change);
+                        hasValidPattern = true;
+                    }
+                }
+                if (hasValidPattern) {
+                    addCommand.call();
+                    updateCommand.call();
+                } else {
+                    logger.warn("commitImpl called for project '" + projectName + "' with no valid file patterns; skipping add/update.");
+                    return false;
+                }
+            } else {
+                logger.warn("commitImpl called for project '" + projectName + "' with null or empty changes; skipping commit.");
+                return false;
             }
-            addCommand.call();
-            updateCommand.call();
 
             CommitCommand commit = git.commit().setMessage(message);
             setCommitAuthor(commit, projectName, userName);
