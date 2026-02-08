@@ -77,7 +77,47 @@ public class ClientScriptModule extends AbstractScriptModule {
     }
 
     @Override
-    protected boolean switchBranchImpl(String projectName, String userName, String branchName, boolean createNew) throws Exception {
-        return rpc.switchBranch(projectName, userName, branchName, createNew);
+    protected boolean switchBranchImpl(String projectName, String userName, String branchName, boolean createNew, boolean forceCheckout) throws Exception {
+        return rpc.switchBranch(projectName, userName, branchName, createNew, forceCheckout);
+    }
+
+    @Override
+    protected boolean stashChangesImpl(String projectName, String userName, String message) throws Exception {
+        return rpc.stashChanges(projectName, userName, message);
+    }
+
+    @Override
+    protected boolean stashPopImpl(String projectName, String userName) throws Exception {
+        return rpc.stashPop(projectName, userName);
+    }
+
+    @Override
+    protected boolean discardAllChangesImpl(String projectName, String userName) throws Exception {
+        return rpc.discardAllChanges(projectName, userName);
+    }
+
+    @Override
+    protected List<String> getConflictingFilesImpl(String projectName) throws Exception {
+        return rpc.getConflictingFiles(projectName);
+    }
+
+    @Override
+    protected boolean resolveConflictsImpl(String projectName, String strategy) throws Exception {
+        return rpc.resolveConflicts(projectName, strategy);
+    }
+
+    @Override
+    protected boolean abortMergeImpl(String projectName) throws Exception {
+        return rpc.abortMerge(projectName);
+    }
+
+    @Override
+    protected boolean hasConflictsImpl(String projectName) throws Exception {
+        return rpc.hasConflicts(projectName);
+    }
+
+    @Override
+    protected boolean importResourcesImpl(String projectName, boolean importTags, boolean importTheme, boolean importImages, String collisionPolicy) throws Exception {
+        return rpc.importResources(projectName, importTags, importTheme, importImages, collisionPolicy);
     }
 }

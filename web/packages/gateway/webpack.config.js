@@ -6,7 +6,7 @@ module.exports = {
     'GitUsersConfig': './src/GitUsersConfig.tsx'
   },
   output: {
-    path: process.env.GIT_GATEWAY_MOUNTED_PATH || path.resolve(process.cwd(), 'git-gateway/src/main/resources/mounted'),
+    path: process.env.GIT_GATEWAY_MOUNTED_PATH || path.resolve(__dirname, '../../../git-gateway/src/main/resources/mounted'),
     filename: '[name].js',
     library: '[name]',
     libraryTarget: 'umd',

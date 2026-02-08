@@ -117,6 +117,42 @@ public class GitRoutes {
             .mount();
         logger.info("Mounted test route: /test");
 
+        // Admin cleanup endpoint to truncate GitReposUsersRecord table
+        // This uses JDBC to bypass ORM deserialization of corrupted encrypted fields
+        routes.newRoute("/admin/cleanup-users")
+            .type(RouteGroup.TYPE_JSON)
+            .method(HttpMethod.POST)
+            .handler(requireAuthenticationAndCsrf((req, res) -> {
+                try {
+                    logger.info("Admin cleanup: Deleting all GitReposUsersRecord entries");
+                    var context = req.getGatewayContext();
+
+                    // Use JDBC to execute raw SQL and bypass ORM
+                    var datasource = context.getDatasourceManager().getDatasource("config");
+                    try (var conn = datasource.getConnection()) {
+                        try (var stmt = conn.createStatement()) {
+                            int deleted = stmt.executeUpdate("DELETE FROM GITREPOSUSERSRECORD");
+                            logger.info("Deleted " + deleted + " corrupted Git user records");
+
+                            JsonObject response = new JsonObject();
+                            response.addProperty("success", true);
+                            response.addProperty("message", "Deleted " + deleted + " records from GitReposUsersRecord");
+                            response.addProperty("deleted", deleted);
+                            return response;
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.error("Admin cleanup failed", e);
+                    res.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+                    JsonObject error = new JsonObject();
+                    error.addProperty("error", "Cleanup failed: " + e.getMessage());
+                    return error;
+                }
+            }))
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .mount();
+        logger.info("Mounted admin cleanup route: /admin/cleanup-users");
+
         logger.info("GitRoutes.mountRoutes completed - all routes mounted successfully");
     }
 
@@ -349,9 +385,29 @@ public class GitRoutes {
     // User handlers
     private static Object getUsers(RequestContext req, HttpServletResponse res) {
         try {
-            List<GitReposUsersRecord> users = req.getGatewayContext()
-                    .getPersistenceInterface()
-                    .query(new SQuery<>(GitReposUsersRecord.META));
+            logger.info("Starting getUsers request");
+
+            // Query with raw SQL to avoid encrypted field issues during migration
+            List<GitReposUsersRecord> users;
+            try {
+                // Try normal query first
+                users = req.getGatewayContext()
+                        .getPersistenceInterface()
+                        .query(new SQuery<>(GitReposUsersRecord.META));
+            } catch (Exception e) {
+                // If encrypted fields cause issues, return helpful error
+                String errorMsg = e.getMessage();
+                if (errorMsg != null && (errorMsg.contains("Bad Hex") || errorMsg.contains("hex"))) {
+                    logger.error("Database contains corrupted encrypted fields. You must delete all Git users and recreate them.", e);
+                    res.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+                    JsonObject error = new JsonObject();
+                    error.addProperty("error", "Database migration required. Run: DELETE FROM GitReposUsersRecord; " +
+                            "Then refresh this page and recreate your Git users with proper credentials.");
+                    error.addProperty("sqlCommand", "DELETE FROM GitReposUsersRecord;");
+                    return error;
+                }
+                throw e;
+            }
 
             logger.info("Found {} users in database", users.size());
 
@@ -368,13 +424,15 @@ public class GitRoutes {
 
             logger.info("Found {} projects in database", projectNames.size());
 
+            logger.info("Starting to map {} users to JSON", users.size());
             return users.stream()
                     .map(u -> {
-                        JsonObject obj = new JsonObject();
-                        obj.addProperty("id", u.getId());
+                        try {
+                            JsonObject obj = new JsonObject();
+                            obj.addProperty("id", u.getId());
 
-                        // Resolve project name from projectId
-                        String projectName = projectNames.get((long) u.getProjectId());
+                            // Resolve project name from projectId
+                            String projectName = projectNames.get((long) u.getProjectId());
                         if (projectName == null) {
                             logger.warn("Project name not found for user id={}, projectId={}",
                                     u.getId(), u.getProjectId());
@@ -389,7 +447,11 @@ public class GitRoutes {
                         obj.addProperty("hasPassword", u.getPassword() != null && !u.getPassword().isEmpty());
                         obj.addProperty("hasSshKey", u.getSSHKey() != null && !u.getSSHKey().isEmpty());
 
-                        return obj;
+                            return obj;
+                        } catch (Exception e) {
+                            logger.error("Error mapping user id={}: {}", u.getId(), e.getMessage(), e);
+                            throw new RuntimeException("Error mapping user", e);
+                        }
                     })
                     .collect(Collectors.toList());
         } catch (Exception e) {

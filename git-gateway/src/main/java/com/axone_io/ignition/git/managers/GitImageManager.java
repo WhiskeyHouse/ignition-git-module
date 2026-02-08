@@ -27,6 +27,8 @@ public class GitImageManager {
     private final static LoggerEx logger = LoggerEx.newBuilder().build(GitImageManager.class);
 
     public static void importImages(String projectName) {
+        logger.warn("Importing images for project '" + projectName + "'. WARNING: This deletes ALL gateway " +
+                "images and replaces them with only this project's images, affecting ALL projects.");
         Path projectDir = getProjectFolderPath(projectName);
         File directory = projectDir.resolve("images").toFile();
 

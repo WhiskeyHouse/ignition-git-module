@@ -71,32 +71,50 @@ public class GitCommissioningUtils {
 
                         // Creation of records
                         PersistenceInterface persistenceInterface = context.getPersistenceInterface();
-                        SQuery<GitProjectsConfigRecord> query = new SQuery<>(GitProjectsConfigRecord.META).eq(GitProjectsConfigRecord.ProjectName, config.getIgnitionProjectName());
-                        if (persistenceInterface.queryOne(query) != null) {
-                            logger.info("Skipping project '" + config.getIgnitionProjectName() + "' because GitProjectsConfigRecord already exists.");
-                            continue;
-                        }
-                        GitProjectsConfigRecord projectsConfigRecord = persistenceInterface.createNew(GitProjectsConfigRecord.META);
-                        projectsConfigRecord.setProjectName(config.getIgnitionProjectName());
-                        projectsConfigRecord.setURI(config.getRepoURI());
+                        SQuery<GitProjectsConfigRecord> configQuery = new SQuery<>(GitProjectsConfigRecord.META).eq(GitProjectsConfigRecord.ProjectName, config.getIgnitionProjectName());
+                        GitProjectsConfigRecord projectsConfigRecord = persistenceInterface.queryOne(configQuery);
 
-                        String userSecretFilePath = System.getenv("GATEWAY_GIT_USER_SECRET_FILE");
-                        if (userSecretFilePath != null) {
-                            config.setSecretFromFilePath(Paths.get(userSecretFilePath), projectsConfigRecord.isSSHAuthentication());
+                        if (projectsConfigRecord != null) {
+                            // Config record exists - check if user record also exists
+                            SQuery<GitReposUsersRecord> userQuery = new SQuery<>(GitReposUsersRecord.META).eq(GitReposUsersRecord.ProjectId, projectsConfigRecord.getId());
+                            if (persistenceInterface.queryOne(userQuery) != null) {
+                                logger.info("Skipping project '" + config.getIgnitionProjectName() + "' because GitProjectsConfigRecord and GitReposUsersRecord already exist.");
+                                continue;
+                            }
+                            logger.info("GitProjectsConfigRecord exists for '" + config.getIgnitionProjectName() + "' but GitReposUsersRecord is missing. Creating user record.");
+                        } else {
+                            // Create new config record
+                            projectsConfigRecord = persistenceInterface.createNew(GitProjectsConfigRecord.META);
+                            projectsConfigRecord.setProjectName(config.getIgnitionProjectName());
+                            projectsConfigRecord.setURI(config.getRepoURI());
+
+                            String userSecretFilePath = System.getenv("GATEWAY_GIT_USER_SECRET_FILE");
+                            if (userSecretFilePath != null) {
+                                config.setSecretFromFilePath(Paths.get(userSecretFilePath), projectsConfigRecord.isSSHAuthentication());
+                            }
+                            if (config.getSshKey() == null && config.getUserPassword() == null) {
+                                throw new Exception("Git User Password or SSHKey not configured.");
+                            }
+                            persistenceInterface.save(projectsConfigRecord);
                         }
-                        if (config.getSshKey() == null && config.getUserPassword() == null) {
-                            throw new Exception("Git User Password or SSHKey not configured.");
-                        }
-                        persistenceInterface.save(projectsConfigRecord);
 
                         GitReposUsersRecord reposUsersRecord = persistenceInterface.createNew(GitReposUsersRecord.META);
                         reposUsersRecord.setUserName(config.getUserName());
                         reposUsersRecord.setIgnitionUser(config.getIgnitionUserName());
                         reposUsersRecord.setProjectId(projectsConfigRecord.getId());
+
+                        // Only set encrypted fields if they have valid values
+                        // EncodedStringField cannot accept placeholder text like "<not used>"
                         if (projectsConfigRecord.isSSHAuthentication()) {
-                            reposUsersRecord.setSSHKey(config.getSshKey());
+                            String sshKey = config.getSshKey();
+                            if (sshKey != null && !sshKey.trim().isEmpty() && !sshKey.trim().equals("<not used>")) {
+                                reposUsersRecord.setSSHKey(sshKey.trim());
+                            }
                         } else {
-                            reposUsersRecord.setPassword(config.getUserPassword());
+                            String password = config.getUserPassword();
+                            if (password != null && !password.trim().isEmpty() && !password.trim().equals("<not used>")) {
+                                reposUsersRecord.setPassword(password.trim());
+                            }
                         }
                         reposUsersRecord.setEmail(config.getUserEmail());
                         persistenceInterface.save(reposUsersRecord);
@@ -109,7 +127,7 @@ public class GitCommissioningUtils {
 
                         // IMPORT TAGS
                         if (config.isImportTags()) {
-                            GitTagManager.importTagManager(config.getIgnitionProjectName());
+                            GitTagManager.importTagManager(config.getIgnitionProjectName(), null);
                         }
 
                         // IMPORT THEMES
