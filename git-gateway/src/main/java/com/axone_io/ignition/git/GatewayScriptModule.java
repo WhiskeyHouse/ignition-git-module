@@ -32,6 +32,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
+import simpleorm.dataset.SQuery;
+
 import static com.axone_io.ignition.git.managers.GitImageManager.exportImages;
 import static com.axone_io.ignition.git.managers.GitManager.*;
 import static com.axone_io.ignition.git.managers.GitTagManager.exportTag;
@@ -114,9 +116,27 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     @Override
     protected boolean commitImpl(String projectName, String userName, String[] changes, String message) {
         try (Git git = getGit(getProjectFolderPath(projectName))) {
-            for (String change : changes) {
-                git.add().addFilepattern(change).call();
-                git.add().setUpdate(true).addFilepattern(change).call();
+            if (changes != null && changes.length > 0) {
+                AddCommand addCommand = git.add();
+                AddCommand updateCommand = git.add().setUpdate(true);
+                boolean hasValidPattern = false;
+                for (String change : changes) {
+                    if (change != null && !change.isEmpty()) {
+                        addCommand.addFilepattern(change);
+                        updateCommand.addFilepattern(change);
+                        hasValidPattern = true;
+                    }
+                }
+                if (hasValidPattern) {
+                    addCommand.call();
+                    updateCommand.call();
+                } else {
+                    logger.warn("commitImpl called for project '" + projectName + "' with no valid file patterns; skipping add/update.");
+                    return false;
+                }
+            } else {
+                logger.warn("commitImpl called for project '" + projectName + "' with null or empty changes; skipping commit.");
+                return false;
             }
 
             CommitCommand commit = git.commit().setMessage(message);
@@ -856,5 +876,20 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             logger.error("Error importing resources for project: " + projectName, e);
             throw new Exception("Failed to import resources: " + e.getMessage(), e);
         }
+    }
+
+    @Override
+    protected List<String> getGitTrackedProjectNamesImpl() {
+        List<String> projectNames = new ArrayList<>();
+        try {
+            SQuery<GitProjectsConfigRecord> query = new SQuery<>(GitProjectsConfigRecord.META);
+            List<GitProjectsConfigRecord> records = context.getPersistenceInterface().query(query);
+            for (GitProjectsConfigRecord record : records) {
+                projectNames.add(record.getProjectName());
+            }
+        } catch (Exception e) {
+            logger.warn("Error querying Git-tracked projects.", e);
+        }
+        return projectNames;
     }
 }

@@ -4,29 +4,20 @@ This document describes the automated release pipeline for the Ignition Git Modu
 
 ## Overview
 
-The project includes two GitHub Actions workflows:
+The project uses two release-related GitHub Actions workflows:
 
-1. **Continuous Integration (CI)** - Runs on PRs and pushes to main
-2. **Build and Release** - Creates releases with signed modules
+1. **Create Release** (`create-release.yml`) - Bumps versions, commits, tags, and pushes
+2. **Release** (`release.yml`) - Builds, signs, and publishes when a tag is pushed
 
-## Continuous Integration
+Releases are triggered via the **Create Release** workflow dispatch in GitHub Actions. It handles version calculation, updates all version files, commits, tags, and pushes. The tag push then triggers the **Release** workflow which builds the module, signs it, and creates the GitHub Release.
 
-The CI workflow (`ci.yml`) automatically runs on:
-- Pull requests to main
-- Pushes to main branch
+## Prerequisites
 
-It performs:
-- Maven build verification
-- Module compilation
-- Artifact creation (7-day retention)
+### Code Signing Keystore
 
-## Release Process
+To produce signed releases, configure these GitHub Secrets:
 
-### Prerequisites
-
-To create signed releases, you need to set up GitHub Secrets with your code signing keystore:
-
-1. **Generate a Keystore** (if you don't have one):
+1. **Generate a keystore** (if you don't have one):
    ```bash
    keytool -genkeypair \
      -alias ignition-git-module \
@@ -34,82 +25,104 @@ To create signed releases, you need to set up GitHub Secrets with your code sign
      -keysize 2048 \
      -validity 3650 \
      -keystore keystore.jks \
-     -dname "CN=Your Name, OU=Your Organization, O=Your Company, L=City, ST=State, C=US"
+     -dname "CN=Your Name, OU=Your Org, O=Your Company, L=City, ST=State, C=US"
    ```
 
-2. **Encode the Keystore to Base64**:
+2. **Encode to base64**:
    ```bash
    base64 -i keystore.jks -o keystore.txt
    ```
 
-3. **Set up GitHub Secrets**:
+3. **Add GitHub Secrets** (Settings > Secrets and variables > Actions):
+   - `KEYSTORE_BASE64` - Contents of keystore.txt
+   - `KEYSTORE_ALIAS` - Alias used when creating the keystore
+   - `KEYSTORE_STOREPASS` - Keystore password
+   - `KEYSTORE_KEYPASS` - Key password
 
-   Navigate to your repository on GitHub:
-   Settings → Secrets and variables → Actions → New repository secret
-
-   Add the following secrets:
-   - `KEYSTORE_BASE64` - Contents of keystore.txt (base64 encoded keystore)
-   - `KEYSTORE_ALIAS` - The alias used when creating the keystore (e.g., "ignition-git-module")
-   - `KEYSTORE_STOREPASS` - The keystore password
-   - `KEYSTORE_KEYPASS` - The key password
-
-### Creating a Release
-
-#### Method 1: Tag-based Release (Recommended)
-
-1. **Update the version in pom.xml**:
-   ```xml
-   <version>2.1.0</version>
-   ```
-
-2. **Commit and push your changes**:
+4. **Delete local keystore files**:
    ```bash
-   git add pom.xml
-   git commit -m "chore: bump version to 2.1.0"
-   git push origin main
+   rm keystore.jks keystore.txt
    ```
 
-3. **Create and push a version tag**:
-   ```bash
-   git tag v2.1.0
-   git push origin v2.1.0
-   ```
+### Release PAT
 
-4. **The workflow will automatically**:
-   - Build the unsigned module
-   - Build and sign the module (if secrets are configured)
-   - Create a GitHub release
-   - Upload both signed and unsigned .modl files
-   - Generate release notes
+The **Create Release** workflow needs a Personal Access Token so that its tag push triggers the **Release** workflow (pushes using `GITHUB_TOKEN` don't trigger other workflows).
 
-#### Method 2: Manual Workflow Dispatch
+1. Create a fine-grained PAT with `contents: write` permission for this repository
+2. Add it as the `RELEASE_PAT` secret in GitHub
 
-1. Go to Actions → Build and Release → Run workflow
-2. Select the branch
-3. Choose release type (snapshot/release)
-4. Click "Run workflow"
+## Creating a Release
 
-This creates a snapshot build without creating a GitHub release.
+### Standard Release (patch / minor / major)
+
+1. Go to **Actions > Create Release > Run workflow**
+2. Set `bump_type` to `patch`, `minor`, or `major`
+3. Leave `dry_run` unchecked
+4. Click **Run workflow**
+
+The workflow will:
+- Read the current version from pom.xml
+- Calculate the new version
+- Update all pom.xml files and package.json
+- Commit, tag (`vX.Y.Z`), and push
+- The tag push triggers the Release workflow which builds, signs, and publishes
+
+### Pre-release
+
+1. Go to **Actions > Create Release > Run workflow**
+2. Set `bump_type` to `prerelease` (no hyphen in the input value)
+3. Set `prerelease_type` to `alpha`, `beta`, or `rc`
+4. Click **Run workflow**
+
+Pre-release versions follow the pattern `X.Y.Z-typeN` (e.g., `2.1.0-beta1`).
+
+The GitHub Release will be marked with the **Pre-release** badge.
+
+### Promoting a Pre-release to Stable
+
+To promote a pre-release (e.g., `2.1.0-rc2`) to a stable release:
+
+1. Run **Create Release** with `bump_type: patch`
+2. This strips the pre-release suffix: `2.1.0-rc2` becomes `2.1.0`
+
+### Dry Run
+
+Set `dry_run: true` to preview what the workflow would do without making any changes.
+
+### Version Calculation Examples
+
+| Current | Bump Type | Pre-release Type | Result |
+|---------|-----------|------------------|--------|
+| `2.0.0` | patch | - | `2.0.1` |
+| `2.0.0` | minor | - | `2.1.0` |
+| `2.0.0` | major | - | `3.0.0` |
+| `2.0.0` | prerelease | beta | `2.1.0-beta1` |
+| `2.1.0-beta1` | prerelease | beta | `2.1.0-beta2` |
+| `2.1.0-beta2` | prerelease | rc | `2.1.0-rc1` |
+| `2.1.0-rc1` | patch | - | `2.1.0` |
+
+## Ignition Module Versioning
+
+Per the [Ignition SDK docs](https://www.sdk-docs.inductiveautomation.com/docs/getting-started/anatomy-of-a-module/the-modulexml-file), module versions use the format `major.minor.revision[-rcX][-betaX]` (e.g., `2.1.0`, `2.1.0-rc1`, `2.1.0-beta2`).
+
+The Release workflow passes the tag version to Maven via `-Dmodule.version`, which sets the `<moduleVersion>` in the built module.
 
 ## Build Artifacts
 
-After a successful release, the following artifacts are created:
+Each release produces:
+- `Git-{version}-signed.modl` - Signed module (when keystore secrets are configured)
+- `Git-{version}-unsigned.modl` - Unsigned module
 
-- `Git-{version}-signed.modl` - Signed module (recommended for production)
-- `Git-{version}-unsigned.modl` - Unsigned module (for testing)
+Artifacts are retained for 90 days and attached to the GitHub Release.
 
 ## Local Development
 
-### Building Unsigned Module
-
+### Unsigned build
 ```bash
-mvn clean package
+mvn clean package -DskipTests
 ```
 
-The .modl file will be in `git-build/target/`
-
-### Building Signed Module
-
+### Signed build
 ```bash
 mvn clean package -Psign \
   -Dkeystore.path=/path/to/keystore.jks \
@@ -118,88 +131,28 @@ mvn clean package -Psign \
   -Dkeystore.keypass=your-key-password
 ```
 
-### Verifying Signature
-
+### Verify signature
 ```bash
 jarsigner -verify -verbose -certs git-build/target/*.modl
 ```
 
-Expected output should include:
-```
-jar verified.
-```
-
-## Versioning Strategy
-
-This project follows [Semantic Versioning](https://semver.org/):
-
-- **MAJOR** version (X.0.0): Incompatible API changes
-- **MINOR** version (0.X.0): New functionality, backwards compatible
-- **PATCH** version (0.0.X): Bug fixes, backwards compatible
-
-### Version Format
-
-- Release builds: `X.Y.Z` (e.g., 2.0.0)
-- Snapshot builds: `X.Y.Z-SNAPSHOT` (e.g., 2.1.0-SNAPSHOT)
-
-The Maven build also appends a timestamp to the module version:
-```
-moduleVersion: 2.0.0.2025120910
-```
-
 ## Troubleshooting
 
-### Build Fails with "npm: not found"
+### Release workflow not triggered after Create Release
+The `RELEASE_PAT` secret may be missing or expired. Pushes using `GITHUB_TOKEN` don't trigger other workflows.
 
-The workflow installs Node.js automatically. If building locally, ensure Node.js 18+ is installed.
+### POM version mismatch error
+The Release workflow verifies that the POM version matches the tag. If they don't match, the Create Release workflow likely didn't run correctly. Check its logs.
 
-### Signing Fails
+### Module not signed
+Verify all four keystore secrets are set: `KEYSTORE_BASE64`, `KEYSTORE_ALIAS`, `KEYSTORE_STOREPASS`, `KEYSTORE_KEYPASS`.
 
-Check that all four keystore secrets are properly set in GitHub:
-- KEYSTORE_BASE64
-- KEYSTORE_ALIAS
-- KEYSTORE_STOREPASS
-- KEYSTORE_KEYPASS
-
-### Module Not Signed in Release
-
-If the release workflow runs but the module isn't signed:
-1. Verify all GitHub secrets are set correctly
-2. Check the workflow logs for signing errors
-3. Ensure the keystore is valid and not expired
-
-### Local Build Succeeds but CI Fails
-
-Common causes:
-1. Dependencies not in public Maven repositories
-2. Different Java versions (CI uses Java 17)
-3. Missing Node.js dependencies
-
-## Release Checklist
-
-Before creating a release:
-
-- [ ] Update version in `pom.xml`
-- [ ] Update CHANGELOG or release notes if applicable
-- [ ] Ensure all tests pass locally
-- [ ] Ensure CI is passing on main branch
-- [ ] Review and merge all pending PRs
-- [ ] Create and push version tag
-- [ ] Verify release artifacts are created
-- [ ] Test the signed .modl file in an Ignition gateway
-- [ ] Update documentation if needed
+### npm build fails
+Ensure Node.js 18+ is installed. The workflow sets this up automatically.
 
 ## Security Notes
 
 - Never commit the keystore file to the repository
 - Keep keystore passwords secure in GitHub Secrets
-- Rotate keystore passwords periodically
-- Use different keystores for development and production
-- Limit access to repository secrets to trusted maintainers
-
-## Support
-
-For issues with the release pipeline:
-1. Check GitHub Actions logs for detailed error messages
-2. Review this documentation
-3. Open an issue on GitHub with relevant logs
+- Use a fine-grained PAT with minimal permissions for `RELEASE_PAT`
+- Rotate credentials periodically

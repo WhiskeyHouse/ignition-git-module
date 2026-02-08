@@ -112,6 +112,47 @@ public class GitBaseAction extends BaseAction {
         }
     }
 
+    /**
+     * Checks if multiple projects are Git-tracked on this gateway and warns the user
+     * that exported tags are gateway-scoped and will be committed to the current project's repo.
+     *
+     * @return true if the user confirms (or there's only one project), false if cancelled
+     */
+    private static boolean confirmExportMultiProject(String currentProject) {
+        try {
+            List<String> trackedProjects = rpc.getGitTrackedProjectNames();
+            if (trackedProjects.size() > 1) {
+                StringBuilder sb = new StringBuilder();
+                sb.append("Multiple Git-tracked projects detected on this gateway:\n\n");
+                for (String name : trackedProjects) {
+                    if (name.equals(currentProject)) {
+                        sb.append("  \u2192 ").append(name).append(" (current)\n");
+                    } else {
+                        sb.append("     ").append(name).append("\n");
+                    }
+                }
+                sb.append("\nTags are gateway-scoped resources shared across all projects.\n");
+                sb.append("This export will write tags to the '").append(currentProject).append("' repository.\n\n");
+                sb.append("Make sure this is the correct project for tracking tag changes.\n");
+                sb.append("Consider configuring .tag-config.json with 'includedProviders'\n");
+                sb.append("to limit which tag providers each project exports.\n\n");
+                sb.append("Continue with export?");
+
+                int choice = JOptionPane.showConfirmDialog(
+                        context.getFrame(),
+                        sb.toString(),
+                        "Multi-Project Gateway Warning",
+                        JOptionPane.YES_NO_OPTION,
+                        JOptionPane.WARNING_MESSAGE);
+
+                return choice == JOptionPane.YES_OPTION;
+            }
+        } catch (Exception e) {
+            logger.warn("Unable to check for other Git-tracked projects: {}", e.getMessage());
+        }
+        return true;
+    }
+
     public static void handleAction(GitActionType type) {
         String message = BundleUtil.get().getStringLenient(type.baseBundleKey + ".ConfirmMessage");
         int messageType = JOptionPane.INFORMATION_MESSAGE;
@@ -131,6 +172,10 @@ public class GitBaseAction extends BaseAction {
                     showCommitPopup(projectName, userName);
                     break;
                 case EXPORT:
+                    if (!confirmExportMultiProject(projectName)) {
+                        confirmPopup = Boolean.FALSE;
+                        break;
+                    }
                     rpc.exportConfig(projectName);
                     break;
                 case REPO:
