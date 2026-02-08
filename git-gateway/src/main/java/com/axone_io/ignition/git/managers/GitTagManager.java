@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import static com.axone_io.ignition.git.GatewayHook.context;
 import static com.axone_io.ignition.git.managers.GitManager.clearDirectory;
@@ -182,14 +183,34 @@ public class GitTagManager {
 
         for (JsonObject udt : sorted) {
             String name = udt.has("name") ? udt.get("name").getAsString() : "unknown";
+            String pathPrefix = udt.has("_pathPrefix") ? udt.get("_pathPrefix").getAsString() : "";
+            // Remove the internal marker before importing
+            udt.remove("_pathPrefix");
             try {
                 // Build the import JSON wrapping this single UDT under _types_
+                // If pathPrefix is set (e.g. "Motor"), wrap in intermediate folder nodes
+                JsonObject innermost = new JsonObject();
+                innermost.add(name, udt);
+
+                JsonObject tagsObj = innermost;
+                if (!pathPrefix.isEmpty()) {
+                    // Build nested folders from innermost to outermost
+                    // e.g. pathPrefix "Motor/Sub" -> Folder("Sub", tags={udt}) -> Folder("Motor", tags={Sub})
+                    String[] segments = pathPrefix.split("/");
+                    for (int i = segments.length - 1; i >= 0; i--) {
+                        JsonObject folder = new JsonObject();
+                        folder.addProperty("name", segments[i]);
+                        folder.addProperty("tagType", TAG_TYPE_FOLDER);
+                        folder.add("tags", tagsObj);
+                        JsonObject outerTags = new JsonObject();
+                        outerTags.add(segments[i], folder);
+                        tagsObj = outerTags;
+                    }
+                }
+
                 JsonObject wrapper = new JsonObject();
                 wrapper.addProperty("name", TYPES_DIR_NAME);
                 wrapper.addProperty("tagType", TAG_TYPE_FOLDER);
-
-                JsonObject tagsObj = new JsonObject();
-                tagsObj.add(name, udt);
                 wrapper.add("tags", tagsObj);
 
                 JsonObject root = new JsonObject();
@@ -200,7 +221,7 @@ public class GitTagManager {
                 String jsonStr = TAG_GSON.toJson(root);
                 // Block until this UDT is imported before proceeding to dependents
                 tagProvider.importTagsAsync(new BasicTagPath(""), jsonStr, "JSON", collisionPolicy, null)
-                    .get();
+                    .get(30, TimeUnit.SECONDS);
                 logger.info("Imported UDT type: " + name);
             } catch (Exception e) {
                 logger.warn("Error importing UDT type '" + name + "'.", e);
@@ -222,10 +243,14 @@ public class GitTagManager {
             } else if (file.getName().endsWith(".json")) {
                 try {
                     String content = Files.readString(file.toPath());
-                    JsonObject udt = new Gson().fromJson(content, JsonObject.class);
+                    JsonObject udt = TAG_GSON.fromJson(content, JsonObject.class);
                     // Ensure the name field reflects the file name (without extension)
                     String tagName = FilenameUtils.removeExtension(file.getName());
                     udt.addProperty("name", tagName);
+                    // Store path prefix so importUdtTypes can reconstruct nested folder hierarchy
+                    if (!pathPrefix.isEmpty()) {
+                        udt.addProperty("_pathPrefix", pathPrefix);
+                    }
                     udtArray.add(udt);
                 } catch (Exception e) {
                     logger.warn("Error reading UDT file: " + file.getAbsolutePath(), e);
@@ -271,7 +296,7 @@ public class GitTagManager {
                 String tagName = FilenameUtils.removeExtension(name);
                 try {
                     String content = Files.readString(entry.toPath());
-                    JsonObject tagObj = new Gson().fromJson(content, JsonObject.class);
+                    JsonObject tagObj = TAG_GSON.fromJson(content, JsonObject.class);
                     tagObj.addProperty("name", tagName);
                     tags.add(tagName, tagObj);
                 } catch (Exception e) {
@@ -290,12 +315,14 @@ public class GitTagManager {
      */
     public static void exportTag(Path projectFolderPath) {
         Path tagFolderPath = projectFolderPath.resolve("tags");
+
+        // Load config BEFORE clearing the directory so user settings are preserved
+        TagExportConfig config = loadTagExportConfig(tagFolderPath);
+
         clearDirectory(tagFolderPath);
 
         try {
             Files.createDirectories(tagFolderPath);
-
-            TagExportConfig config = loadTagExportConfig(tagFolderPath);
 
             for (TagProvider tagProvider : context.getTagManager().getTagProviders()) {
                 String providerName = tagProvider.getName();
