@@ -445,8 +445,10 @@ public class GitTagManager {
 
             } else if (TAG_TYPE_UDT_DEF.equals(tagType)) {
                 // UDT type definitions go under _types_/
-                Path typesDir = getTypesDir(parentDir);
-                writeTagFile(typesDir, name, tagJson);
+                // If we're already under _types_/, preserve the current directory hierarchy
+                // Otherwise, move to the root _types_/ directory
+                Path targetDir = isUnderTypesDir(parentDir) ? parentDir : getTypesDir(parentDir);
+                writeTagFile(targetDir, name, tagJson);
 
             } else {
                 // All other tags: AtomicTag, UdtInstance, OPC, Expression, etc.
@@ -455,6 +457,20 @@ public class GitTagManager {
         } catch (IOException e) {
             logger.warn("Error writing tag '" + name + "' to " + parentDir, e);
         }
+    }
+
+    /**
+     * Checks if the given path is already under the {@code _types_/} directory.
+     */
+    private static boolean isUnderTypesDir(Path path) {
+        Path current = path;
+        while (current != null) {
+            if (current.getFileName() != null && current.getFileName().toString().equals(TYPES_DIR_NAME)) {
+                return true;
+            }
+            current = current.getParent();
+        }
+        return false;
     }
 
     /**
