@@ -558,7 +558,7 @@ public class GitActionManager {
 
     public static void showImportResourcesPopup(String projectName) {
         // Show checkbox dialog for importing resources without pulling
-        JCheckBox tagsCheckBox = new JCheckBox("Tags", true);
+        JCheckBox tagsCheckBox = new JCheckBox("Tags & Tag Groups", true);
         JCheckBox themesCheckBox = new JCheckBox("Themes", false);
         JCheckBox imagesCheckBox = new JCheckBox("Images", false);
 
@@ -618,7 +618,7 @@ public class GitActionManager {
                     boolean success = get();
                     if (success) {
                         StringBuilder imported = new StringBuilder("Successfully imported:");
-                        if (importTags) imported.append("\n  • Tags");
+                        if (importTags) imported.append("\n  • Tags & Tag Groups");
                         if (importTheme) imported.append("\n  • Themes");
                         if (importImages) imported.append("\n  • Images");
 

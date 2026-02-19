@@ -90,6 +90,9 @@ public class GitTagManager {
                 : config.getCollisionPolicy();
         CollisionPolicy collisionPolicy = resolveCollisionPolicy(policyStr);
 
+        // Import tag groups first so that tags can reference them by name
+        GitTagGroupManager.importTagGroups(tagsDir);
+
         if (detectFormat(tagsDir) == Format.INDIVIDUAL_FILES) {
             importFromIndividualFiles(tagsDir, collisionPolicy);
         } else {
@@ -360,6 +363,9 @@ public class GitTagManager {
 
             // Write the config file (preserves user settings for next import)
             writeTagExportConfig(tagFolderPath, config);
+
+            // Export tag groups (scan classes) for all providers
+            GitTagGroupManager.exportTagGroups(tagFolderPath);
 
         } catch (Exception e) {
             logger.error("Error exporting tags: " + e.toString(), e);
