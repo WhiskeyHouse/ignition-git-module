@@ -5,6 +5,7 @@ import com.inductiveautomation.ignition.common.gson.GsonBuilder;
 import com.inductiveautomation.ignition.common.gson.JsonElement;
 import com.inductiveautomation.ignition.common.gson.JsonObject;
 import com.inductiveautomation.ignition.common.gson.Gson;
+import com.inductiveautomation.ignition.common.sqltags.model.types.ScanClassComparison;
 import com.inductiveautomation.ignition.common.tags.config.CommonTagGroupProperties;
 import com.inductiveautomation.ignition.common.tags.config.TagGroupConfiguration;
 import com.inductiveautomation.ignition.common.tags.config.TagGroupMode;
@@ -242,6 +243,9 @@ public class GitTagGroupManager {
         boolean isNew = !existingGroupNames.contains(name);
 
         BasicPropertySet props = new BasicPropertySet();
+        // Name must be present in the PropertySet so the TagGroupConfiguration(PropertySet, boolean)
+        // constructor can read it back correctly via CommonTagGroupProperties.Name.
+        props.set(CommonTagGroupProperties.Name, name);
 
         if (obj.has("rate")) {
             props.set(CommonTagGroupProperties.Rate, obj.get("rate").getAsInt());
@@ -260,11 +264,19 @@ public class GitTagGroupManager {
         if (obj.has("drivingExpression")) {
             props.set(CommonTagGroupProperties.DrivingExpression, obj.get("drivingExpression").getAsString());
         }
-        if (obj.has("oneShot")) {
-            props.set(CommonTagGroupProperties.OneShot, obj.get("oneShot").getAsBoolean());
+        if (obj.has("drivingComparison")) {
+            try {
+                ScanClassComparison comparison = ScanClassComparison.valueOf(obj.get("drivingComparison").getAsString());
+                props.set(CommonTagGroupProperties.DrivingComparison, comparison);
+            } catch (IllegalArgumentException e) {
+                logger.warn("Unknown drivingComparison '" + obj.get("drivingComparison").getAsString() + "' for group '" + name + "', using default.");
+            }
         }
         if (obj.has("drivingComparisonValue")) {
             props.set(CommonTagGroupProperties.DrivingComparisonValue, obj.get("drivingComparisonValue").getAsDouble());
+        }
+        if (obj.has("oneShot")) {
+            props.set(CommonTagGroupProperties.OneShot, obj.get("oneShot").getAsBoolean());
         }
 
         return new TagGroupConfiguration(props, isNew);

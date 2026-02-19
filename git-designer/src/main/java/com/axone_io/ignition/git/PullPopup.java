@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import javax.imageio.ImageIO;
 import javax.swing.*;
 import java.awt.*;
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
 
@@ -24,12 +25,13 @@ public class PullPopup extends JFrame {
     private final JCheckBox tagsCheckBox;
 
     public PullPopup(Component parent) {
-        try {
-            InputStream iconStream = getClass().getResourceAsStream(
-                    "/com/axone_io/ignition/git/icons/ic_commit.svg");
+        try (InputStream iconStream = getClass().getResourceAsStream(
+                "/com/axone_io/ignition/git/icons/ic_commit.svg")) {
             if (iconStream != null) {
-                ImageIcon icon = new ImageIcon(ImageIO.read(iconStream));
-                setIconImage(icon.getImage());
+                BufferedImage img = ImageIO.read(iconStream);
+                if (img != null) {
+                    setIconImage(img);
+                }
             }
         } catch (IOException e) {
             logger.trace(e.toString(), e);
