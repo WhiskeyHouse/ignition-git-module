@@ -1,0 +1,1 @@
+"use strict";(this.webpackChunk_ignition_git_module_gateway=this.webpackChunk_ignition_git_module_gateway||[]).push([[225],{225:(e,i,t)=>{t.d(i,{createArchitectureServices:()=>a.S});var a=t(7713);t(7492)}}]);
