@@ -1,1 +1,0 @@
-"use strict";(this.webpackChunk_ignition_git_module_gateway=this.webpackChunk_ignition_git_module_gateway||[]).push([[356],{3356:(i,e,t)=>{t.d(e,{createInfoServices:()=>a.v});var a=t(2963);t(7492)}}]);

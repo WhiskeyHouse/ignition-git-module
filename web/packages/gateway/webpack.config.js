@@ -3,7 +3,8 @@ const path = require('path');
 module.exports = {
   entry: {
     'GitProjectsConfig': './src/GitProjectsConfig.tsx',
-    'GitUsersConfig': './src/GitUsersConfig.tsx'
+    'GitUsersConfig': './src/GitUsersConfig.tsx',
+    'DocsViewer': './src/DocsViewer.tsx'
   },
   output: {
     path: process.env.GIT_GATEWAY_MOUNTED_PATH || path.resolve(__dirname, '../../../git-gateway/src/main/resources/mounted'),

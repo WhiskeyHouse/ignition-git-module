@@ -123,6 +123,49 @@ public class GitActionManager {
         }
     }
 
+    private static String getGatewayBaseUrl() {
+        try {
+            com.inductiveautomation.ignition.client.gateway_interface.GatewayConnection gc =
+                com.inductiveautomation.ignition.client.gateway_interface.GatewayConnectionManager.getInstance();
+            if (gc != null) {
+                String webUrl = gc.getGatewayWebURL();
+                if (webUrl != null && !webUrl.isEmpty()) {
+                    return webUrl;
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("Could not get gateway address dynamically, using fallback", e);
+        }
+        return "https://localhost:9043";
+    }
+
+    public static void openDocsViewer(String projectName) {
+        try {
+            String baseUrl = getGatewayBaseUrl();
+            // Use the redirect endpoint which stores params in sessionStorage
+            // before navigating to the config page (bypasses SPA param stripping)
+            String docsUrl = baseUrl + "/data/git/docs/redirect?project="
+                + java.net.URLEncoder.encode(projectName, java.nio.charset.StandardCharsets.UTF_8);
+            Desktop.getDesktop().browse(new URI(docsUrl));
+        } catch (IOException | URISyntaxException e) {
+            logger.error("Error opening docs viewer", e);
+        }
+    }
+
+    public static void openDocsViewer(String projectName, String docPath) {
+        try {
+            String baseUrl = getGatewayBaseUrl();
+            // Use the redirect endpoint which stores params in sessionStorage
+            // before navigating to the config page (bypasses SPA param stripping)
+            String docsUrl = baseUrl + "/data/git/docs/redirect?project="
+                + java.net.URLEncoder.encode(projectName, java.nio.charset.StandardCharsets.UTF_8)
+                + "&path=" + java.net.URLEncoder.encode(docPath, java.nio.charset.StandardCharsets.UTF_8);
+            Desktop.getDesktop().browse(new URI(docsUrl));
+        } catch (IOException | URISyntaxException e) {
+            logger.error("Error opening docs viewer", e);
+        }
+    }
+
 
 
     public static void showPullPopup(String projectName, String userName) {

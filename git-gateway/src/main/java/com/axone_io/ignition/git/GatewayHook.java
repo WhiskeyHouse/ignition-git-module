@@ -66,6 +66,12 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                     "/res/git/GitUsersConfig.js"
             );
 
+            // Create SystemJsModule for Docs Viewer config page
+            SystemJsModule docsModule = new SystemJsModule(
+                    "DocsViewer",
+                    "/res/git/DocsViewer.js"
+            );
+
             // Add Git configuration category to Platform section
             // Using getPlatform() to add to Platform section where config pages go in 8.3
             context.getWebResourceManager().getNavigationModel()
@@ -80,6 +86,10 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                             .addPage("Git Users", page -> page
                                     .position(20)
                                     .mount("/git/users", "GitUsersConfig", usersModule)
+                            )
+                            .addPage("Project Docs", page -> page
+                                    .position(30)
+                                    .mount("/git/docs", "DocsViewer", docsModule)
                             )
                     );
 
@@ -131,32 +141,14 @@ public class GatewayHook extends AbstractGatewayModuleHook {
 
     @Override
     public void mountRouteHandlers(RouteGroup routes) {
-        // Mount Git API routes - accessible at /main/data/com.axone_io.ignition.git/*
+        // Mount Git API routes
         //
-        // SECURITY: All routes are protected with session-based authentication and CSRF validation:
-        // - Authentication: Requires valid gateway session (users must be logged in)
-        //   * Verified by checking for active HttpSession with authenticated user
-        //   * Returns HTTP 401 Unauthorized if session is missing or user is not authenticated
-        //
-        // - CSRF Protection: Validated for all mutating operations (POST/PUT/DELETE)
-        //   * CSRF tokens must be provided in the X-CSRF-Token HTTP header
-        //   * Tokens are validated against session tokens
-        //   * Returns HTTP 403 Forbidden on CSRF validation failure
-        //
-        // - Route Protection:
-        //   * GET endpoints: Authentication required
-        //   * POST/PUT/DELETE endpoints: Authentication + CSRF token required
-        //
-        // - Credential Protection:
+        // SECURITY: All routes use Ignition's SecurityZoneAccessControlStrategy:
+        //   * GET endpoints use ZONE_READ (requires authenticated gateway user)
+        //   * POST/PUT/DELETE endpoints use ZONE_WRITE (requires write access)
         //   * Passwords and SSH keys are never returned in API responses
-        //   * Only hasPassword/hasSshKey boolean flags are exposed
-        //
-        // These security measures ensure that only authenticated gateway users can access
-        // these endpoints, protecting against unauthorized access and CSRF attacks on Git
-        // project configurations and user credentials (passwords, SSH keys).
-        //
-        // Implementation: RouteSecurityHelper wraps all route handlers with security checks.
         com.axone_io.ignition.git.web.api.GitRoutes.mountRoutes(routes);
-        logger.info("Mounted Git API routes with session authentication and CSRF protection");
+        com.axone_io.ignition.git.web.api.DocsRoutes.mountRoutes(routes);
+        logger.info("Mounted Git API routes");
     }
 }

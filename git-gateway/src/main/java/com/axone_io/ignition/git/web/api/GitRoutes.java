@@ -4,10 +4,11 @@ import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
 import com.axone_io.ignition.git.records.GitReposUsersRecord;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
-import com.inductiveautomation.ignition.gateway.dataroutes.AccessControlStrategy;
 import com.inductiveautomation.ignition.gateway.dataroutes.HttpMethod;
 import com.inductiveautomation.ignition.gateway.dataroutes.RequestContext;
 import com.inductiveautomation.ignition.gateway.dataroutes.RouteGroup;
+import com.inductiveautomation.ignition.gateway.dataroutes.AccessControlStrategy;
+import com.inductiveautomation.ignition.gateway.dataroutes.SecurityZoneAccessControlStrategy;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,12 +18,13 @@ import java.io.BufferedReader;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static com.axone_io.ignition.git.web.api.RouteSecurityHelper.requireAuthentication;
-import static com.axone_io.ignition.git.web.api.RouteSecurityHelper.requireAuthenticationAndCsrf;
-
 /**
  * Route handlers for Git configuration API endpoints.
- * All routes are protected with session-based authentication and CSRF protection.
+ * All routes use Ignition's SecurityZoneAccessControlStrategy for authentication:
+ * - ZONE_READ for GET endpoints (requires authenticated gateway user)
+ * - ZONE_WRITE for POST/PUT/DELETE endpoints (requires authenticated gateway user with write access)
+ * Mutation endpoints (POST/PUT/DELETE) additionally require a valid CSRF token
+ * via the X-CSRF-Token header, validated by RouteSecurityHelper.
  */
 public class GitRoutes {
     private static final Logger logger = LoggerFactory.getLogger(GitRoutes.class);
@@ -30,99 +32,90 @@ public class GitRoutes {
 
     public static void mountRoutes(RouteGroup routes) {
         logger.info("GitRoutes.mountRoutes called - starting to mount routes");
-        logger.info("RouteGroup instance: " + routes.getClass().getName());
 
-        // CSRF token endpoint - must be called first by frontend to obtain token
+        // CSRF token endpoint - frontend must call this first to obtain a token
+        // for use in mutation requests (POST/PUT/DELETE) via the X-CSRF-Token header.
         routes.newRoute("/csrf-token")
             .type(RouteGroup.TYPE_JSON)
             .handler(RouteSecurityHelper::getCsrfToken)
             .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
-        logger.info("Mounted CSRF token route: /csrf-token (GET)");
 
-        // Projects routes - all protected with authentication and CSRF validation
-        try {
-            logger.info("Mounting route: /projects (GET)");
-            routes.newRoute("/projects")
-                .type(RouteGroup.TYPE_JSON)
-                .handler(requireAuthentication(GitRoutes::getProjects))
-                .accessControl(AccessControlStrategy.OPEN_ROUTE)
-                .mount();
-            logger.info("Successfully mounted route: /projects (GET)");
-        } catch (Exception e) {
-            logger.error("Failed to mount route /projects (GET)", e);
-            throw e;
-        }
+        // Projects routes
+        routes.newRoute("/projects")
+            .type(RouteGroup.TYPE_JSON)
+            .handler(GitRoutes::getProjects)
+            .accessControl(SecurityZoneAccessControlStrategy.ZONE_READ)
+            .mount();
 
         routes.newRoute("/projects/:id")
             .type(RouteGroup.TYPE_JSON)
-            .handler(requireAuthentication(GitRoutes::getProject))
-            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .handler(GitRoutes::getProject)
+            .accessControl(SecurityZoneAccessControlStrategy.ZONE_READ)
             .mount();
 
         routes.newRoute("/projects")
             .type(RouteGroup.TYPE_JSON)
             .method(HttpMethod.POST)
-            .handler(requireAuthenticationAndCsrf(GitRoutes::createProject))
-            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .handler(RouteSecurityHelper.requireAuthenticationAndCsrf(GitRoutes::createProject))
+            .accessControl(SecurityZoneAccessControlStrategy.ZONE_WRITE)
             .mount();
 
         routes.newRoute("/projects/:id")
             .type(RouteGroup.TYPE_JSON)
             .method(HttpMethod.PUT)
-            .handler(requireAuthenticationAndCsrf(GitRoutes::updateProject))
-            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .handler(RouteSecurityHelper.requireAuthenticationAndCsrf(GitRoutes::updateProject))
+            .accessControl(SecurityZoneAccessControlStrategy.ZONE_WRITE)
             .mount();
 
         routes.newRoute("/projects/:id")
             .type(RouteGroup.TYPE_JSON)
             .method(HttpMethod.DELETE)
-            .handler(requireAuthenticationAndCsrf(GitRoutes::deleteProject))
-            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .handler(RouteSecurityHelper.requireAuthenticationAndCsrf(GitRoutes::deleteProject))
+            .accessControl(SecurityZoneAccessControlStrategy.ZONE_WRITE)
             .mount();
 
-        // Users routes - all protected with authentication and CSRF validation
+        // Users routes
         routes.newRoute("/users")
             .type(RouteGroup.TYPE_JSON)
-            .handler(requireAuthentication(GitRoutes::getUsers))
-            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .handler(GitRoutes::getUsers)
+            .accessControl(SecurityZoneAccessControlStrategy.ZONE_READ)
             .mount();
 
         routes.newRoute("/users")
             .type(RouteGroup.TYPE_JSON)
             .method(HttpMethod.POST)
-            .handler(requireAuthenticationAndCsrf(GitRoutes::createUser))
-            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .handler(RouteSecurityHelper.requireAuthenticationAndCsrf(GitRoutes::createUser))
+            .accessControl(SecurityZoneAccessControlStrategy.ZONE_WRITE)
             .mount();
 
         routes.newRoute("/users/:id")
             .type(RouteGroup.TYPE_JSON)
             .method(HttpMethod.PUT)
-            .handler(requireAuthenticationAndCsrf(GitRoutes::updateUser))
-            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .handler(RouteSecurityHelper.requireAuthenticationAndCsrf(GitRoutes::updateUser))
+            .accessControl(SecurityZoneAccessControlStrategy.ZONE_WRITE)
             .mount();
 
         routes.newRoute("/users/:id")
             .type(RouteGroup.TYPE_JSON)
             .method(HttpMethod.DELETE)
-            .handler(requireAuthenticationAndCsrf(GitRoutes::deleteUser))
-            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .handler(RouteSecurityHelper.requireAuthenticationAndCsrf(GitRoutes::deleteUser))
+            .accessControl(SecurityZoneAccessControlStrategy.ZONE_WRITE)
             .mount();
 
-        // Test route - also protected with authentication
+        // Test route
         routes.newRoute("/test")
             .type(RouteGroup.TYPE_PLAIN_TEXT)
-            .handler(requireAuthentication((req, res) -> "Git module routes are working!"))
-            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .handler((req, res) -> "Git module routes are working!")
+            .accessControl(SecurityZoneAccessControlStrategy.ZONE_READ)
             .mount();
-        logger.info("Mounted test route: /test");
 
         // Admin cleanup endpoint to truncate GitReposUsersRecord table
         // This uses JDBC to bypass ORM deserialization of corrupted encrypted fields
         routes.newRoute("/admin/cleanup-users")
             .type(RouteGroup.TYPE_JSON)
             .method(HttpMethod.POST)
-            .handler(requireAuthenticationAndCsrf((req, res) -> {
+            .handler(RouteSecurityHelper.requireAuthenticationAndCsrf((req, res) -> {
                 try {
                     logger.info("Admin cleanup: Deleting all GitReposUsersRecord entries");
                     var context = req.getGatewayContext();
@@ -149,9 +142,8 @@ public class GitRoutes {
                     return error;
                 }
             }))
-            .accessControl(AccessControlStrategy.OPEN_ROUTE)
+            .accessControl(SecurityZoneAccessControlStrategy.ZONE_WRITE)
             .mount();
-        logger.info("Mounted admin cleanup route: /admin/cleanup-users");
 
         logger.info("GitRoutes.mountRoutes completed - all routes mounted successfully");
     }
