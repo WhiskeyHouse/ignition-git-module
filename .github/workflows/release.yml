@@ -47,6 +47,9 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: 'maven'
+          server-id: github
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
 
       - name: Set up Node.js ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v4
@@ -135,6 +138,28 @@ jobs:
           name: ignition-git-module-${{ steps.version.outputs.tag_version }}
           path: git-build/target/Git-${{ steps.version.outputs.tag_version }}-*.modl
           retention-days: 90
+
+      - name: Publish to GitHub Packages
+        run: |
+          VERSION="${{ steps.version.outputs.tag_version }}"
+
+          # Prefer signed module, fall back to unsigned
+          if [ -f "git-build/target/Git-${VERSION}-signed.modl" ]; then
+            MODL_FILE="git-build/target/Git-${VERSION}-signed.modl"
+          else
+            MODL_FILE="git-build/target/Git-${VERSION}-unsigned.modl"
+          fi
+
+          mvn deploy:deploy-file \
+            -DgroupId=com.axone_io.ignition \
+            -DartifactId=git-module \
+            -Dversion=$VERSION \
+            -Dpackaging=modl \
+            -Dfile="$MODL_FILE" \
+            -DrepositoryId=github \
+            -Durl=https://maven.pkg.github.com/${{ github.repository }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
