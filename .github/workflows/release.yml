@@ -139,11 +139,44 @@ jobs:
           path: git-build/target/Git-${{ steps.version.outputs.tag_version }}-*.modl
           retention-days: 90
 
+      - name: Generate release notes
+        run: |
+          gh api repos/${{ github.repository }}/releases/generate-notes \
+            -f tag_name="v${{ steps.version.outputs.tag_version }}" \
+            --jq '.body' > ${{ runner.temp }}/release-notes.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish to GitHub Packages
         run: |
-          VERSION="${{ steps.version.outputs.tag_version }}"
+          python3 << 'PYEOF'
+          import xml.sax.saxutils as saxutils
+          import os
 
-          # Prefer signed module, fall back to unsigned
+          version = os.environ["VERSION"]
+          repo = os.environ["REPO"]
+
+          with open(os.environ["NOTES_FILE"]) as f:
+              desc = saxutils.escape(f.read().strip())
+
+          pom = "\n".join([
+              '<?xml version="1.0" encoding="UTF-8"?>',
+              '<project xmlns="http://maven.apache.org/POM/4.0.0">',
+              "  <modelVersion>4.0.0</modelVersion>",
+              "  <groupId>com.axone_io.ignition</groupId>",
+              "  <artifactId>git-module</artifactId>",
+              f"  <version>{version}</version>",
+              "  <packaging>modl</packaging>",
+              "  <name>Ignition Git Module</name>",
+              f"  <description>{desc}</description>",
+              f"  <url>https://github.com/{repo}</url>",
+              "</project>",
+          ])
+
+          with open(os.environ["POM_FILE"], "w") as f:
+              f.write(pom)
+          PYEOF
+
           if [ -f "git-build/target/Git-${VERSION}-signed.modl" ]; then
             MODL_FILE="git-build/target/Git-${VERSION}-signed.modl"
           else
@@ -151,22 +184,23 @@ jobs:
           fi
 
           mvn deploy:deploy-file \
-            -DgroupId=com.axone_io.ignition \
-            -DartifactId=git-module \
-            -Dversion=$VERSION \
-            -Dpackaging=modl \
+            -DpomFile="${POM_FILE}" \
             -Dfile="$MODL_FILE" \
             -DrepositoryId=github \
-            -Durl=https://maven.pkg.github.com/${{ github.repository }}
+            -Durl="https://maven.pkg.github.com/${REPO}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.tag_version }}
+          NOTES_FILE: ${{ runner.temp }}/release-notes.md
+          POM_FILE: ${{ runner.temp }}/deploy-pom.xml
+          REPO: ${{ github.repository }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
         with:
           draft: false
           prerelease: ${{ steps.version.outputs.is_prerelease }}
-          generate_release_notes: true
+          body_path: ${{ runner.temp }}/release-notes.md
           files: |
             git-build/target/Git-${{ steps.version.outputs.tag_version }}-*.modl
         env:
