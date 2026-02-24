@@ -1,6 +1,7 @@
 package com.axone_io.ignition.git;
 
 import com.axone_io.ignition.git.actions.GitBaseAction;
+import com.axone_io.ignition.git.managers.DocsPopupMenuListener;
 import com.axone_io.ignition.git.utils.IconUtils;
 import com.inductiveautomation.ignition.client.gateway_interface.GatewayConnection;
 import com.inductiveautomation.ignition.common.BundleUtil;
@@ -14,12 +15,17 @@ import com.inductiveautomation.ignition.designer.model.DesignerContext;
 import com.inductiveautomation.ignition.common.script.ScriptManager;
 import com.inductiveautomation.ignition.designer.model.AbstractDesignerModuleHook;
 import com.inductiveautomation.ignition.designer.model.SaveContext;
+import com.inductiveautomation.ignition.designer.navtree.model.AbstractNavTreeNode;
+import com.inductiveautomation.ignition.designer.navtree.NavTreePanel;
 import com.jidesoft.action.DockableBarManager;
+import com.jidesoft.docking.DockableFrame;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.swing.*;
 import javax.swing.Timer;
+import javax.swing.event.PopupMenuListener;
+import java.lang.reflect.Field;
 import java.util.*;
 import java.util.List;
 
@@ -33,6 +39,8 @@ public class DesignerHook extends AbstractDesignerModuleHook {
     public static String userName;
     JPanel gitStatusBar;
     Timer gitUserTimer;
+    PopupMenuListener docsPopupListener;
+    JPopupMenu sharedPopupMenuRef;
     @Override
     public void initializeScriptManager(ScriptManager manager) {
         super.initializeScriptManager(manager);
@@ -91,6 +99,7 @@ public class DesignerHook extends AbstractDesignerModuleHook {
 
         initStatusBar();
         initToolBar();
+        initDocsContextMenu();
 
     }
 
@@ -142,9 +151,80 @@ public class DesignerHook extends AbstractDesignerModuleHook {
         toolbar.add(new GitBaseAction(GitBaseAction.GitActionType.HISTORY));
         toolbar.add(new GitBaseAction(GitBaseAction.GitActionType.IMPORT));
         toolbar.add(new GitBaseAction(GitBaseAction.GitActionType.EXPORT));
+        toolbar.add(new GitBaseAction(GitBaseAction.GitActionType.DOCS));
         toolbar.add(new GitBaseAction(GitBaseAction.GitActionType.REPO));
 
         toolBarManager.addDockableBar(toolbar);
+    }
+
+    private void initDocsContextMenu() {
+        // Delay initialization to allow the NavTreePanel to be fully loaded
+        Timer initTimer = new Timer(2000, e -> {
+            try {
+                DockableFrame frame = context.getDockingManager().getFrame(NavTreePanel.DOCKING_KEY);
+                if (frame == null) {
+                    logger.debug("NavTreePanel docking frame not found, skipping docs context menu init");
+                    return;
+                }
+
+                // Find the JTree inside the NavTreePanel
+                NavTreePanel navTreePanel = findNavTreePanel(frame);
+                if (navTreePanel == null) {
+                    logger.debug("NavTreePanel component not found, skipping docs context menu init");
+                    return;
+                }
+
+                JTree navTree = navTreePanel.getTree();
+                if (navTree == null) {
+                    logger.debug("NavTree JTree not found, skipping docs context menu init");
+                    return;
+                }
+
+                // Access the shared popup menu via reflection on AbstractNavTreeNode
+                Field popupField = AbstractNavTreeNode.class.getDeclaredField("sharedPopupMenu");
+                popupField.setAccessible(true);
+                JPopupMenu sharedPopup = (JPopupMenu) popupField.get(null);
+
+                if (sharedPopup == null) {
+                    logger.debug("Shared popup menu is null, skipping docs context menu init");
+                    return;
+                }
+
+                sharedPopupMenuRef = sharedPopup;
+                docsPopupListener = new DocsPopupMenuListener(navTree);
+                sharedPopup.addPopupMenuListener(docsPopupListener);
+
+                logger.info("Docs context menu listener initialized successfully");
+
+            } catch (NoSuchFieldException ex) {
+                logger.warn("Could not find sharedPopupMenu field on AbstractNavTreeNode - " +
+                           "docs context menu will not be available. " +
+                           "This may indicate an incompatible Ignition SDK version.");
+            } catch (Exception ex) {
+                logger.warn("Failed to initialize docs context menu: {}", ex.getMessage());
+                logger.debug("Docs context menu init error details:", ex);
+            }
+        });
+        initTimer.setRepeats(false);
+        initTimer.start();
+    }
+
+    private NavTreePanel findNavTreePanel(java.awt.Container container) {
+        if (container instanceof NavTreePanel) {
+            return (NavTreePanel) container;
+        }
+        for (java.awt.Component child : container.getComponents()) {
+            if (child instanceof NavTreePanel) {
+                return (NavTreePanel) child;
+            }
+            if (child instanceof java.awt.Container) {
+                NavTreePanel found = findNavTreePanel((java.awt.Container) child);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
     }
 
     @Override
@@ -174,5 +254,9 @@ public class DesignerHook extends AbstractDesignerModuleHook {
         statusBar.removeDisplay(gitStatusBar);
 
         gitUserTimer.stop();
+
+        if (sharedPopupMenuRef != null && docsPopupListener != null) {
+            sharedPopupMenuRef.removePopupMenuListener(docsPopupListener);
+        }
     }
 }

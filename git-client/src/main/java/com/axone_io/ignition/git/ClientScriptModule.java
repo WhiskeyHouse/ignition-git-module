@@ -125,4 +125,9 @@ public class ClientScriptModule extends AbstractScriptModule {
     protected List<String> getGitTrackedProjectNamesImpl() {
         return rpc.getGitTrackedProjectNames();
     }
+
+    @Override
+    protected List<String> listDocsForResourceImpl(String projectName, String resourcePath) throws Exception {
+        return rpc.listDocsForResource(projectName, resourcePath);
+    }
 }

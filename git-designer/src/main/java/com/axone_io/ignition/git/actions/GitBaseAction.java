@@ -20,6 +20,7 @@ import static com.axone_io.ignition.git.managers.GitActionManager.showBranchPopu
 import static com.axone_io.ignition.git.managers.GitActionManager.showConfirmPopup;
 import static com.axone_io.ignition.git.managers.GitActionManager.openRepositoryLink;
 import static com.axone_io.ignition.git.managers.GitActionManager.showImportResourcesPopup;
+import static com.axone_io.ignition.git.managers.GitActionManager.openDocsViewer;
 
 public class GitBaseAction extends BaseAction {
     private static final Logger logger = LoggerFactory.getLogger(GitBaseAction.class);
@@ -60,6 +61,11 @@ public class GitBaseAction extends BaseAction {
         IMPORT(
             "DesignerHook.Actions.Import",
             "/com/axone_io/ignition/git/icons/ic_import.svg"
+        ),
+
+        DOCS(
+            "DesignerHook.Actions.Docs",
+            "/com/axone_io/ignition/git/icons/ic_docs.svg"
         );
 
         private final String baseBundleKey;
@@ -192,6 +198,10 @@ public class GitBaseAction extends BaseAction {
                 case IMPORT:
                     confirmPopup = Boolean.FALSE;
                     showImportResourcesPopup(projectName);
+                    break;
+                case DOCS:
+                    confirmPopup = Boolean.FALSE;
+                    openDocsViewer(projectName);
                     break;
             }
             if(confirmPopup) SwingUtilities.invokeLater(new Thread(() -> showConfirmPopup(message, messageType)));

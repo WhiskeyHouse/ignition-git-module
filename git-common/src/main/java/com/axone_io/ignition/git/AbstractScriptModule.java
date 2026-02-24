@@ -153,6 +153,12 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
         return getGitTrackedProjectNamesImpl();
     }
 
+    @Override
+    public List<String> listDocsForResource(String projectName,
+                                            String resourcePath) throws Exception {
+        return listDocsForResourceImpl(projectName, resourcePath);
+    }
+
     protected abstract boolean pullImpl(String projectName, String userName, boolean importTags, boolean importTheme,
                                         boolean importImages) throws Exception;
     protected abstract boolean pushImpl(String projectName, String userName) throws Exception;
@@ -176,5 +182,6 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
     protected abstract boolean hasConflictsImpl(String projectName) throws Exception;
     protected abstract boolean importResourcesImpl(String projectName, boolean importTags, boolean importTheme, boolean importImages, String collisionPolicy) throws Exception;
     protected abstract List<String> getGitTrackedProjectNamesImpl();
+    protected abstract List<String> listDocsForResourceImpl(String projectName, String resourcePath) throws Exception;
 
 }

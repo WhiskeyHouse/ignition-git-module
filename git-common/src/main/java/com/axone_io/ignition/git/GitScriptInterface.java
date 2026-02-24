@@ -40,4 +40,7 @@ public interface GitScriptInterface {
     // Multi-project awareness
     List<String> getGitTrackedProjectNames();
 
+    // Docs discovery
+    List<String> listDocsForResource(String projectName, String resourcePath) throws Exception;
+
 }

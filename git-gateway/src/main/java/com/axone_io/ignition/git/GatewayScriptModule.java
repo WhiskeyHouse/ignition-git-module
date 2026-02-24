@@ -24,6 +24,8 @@ import org.eclipse.jgit.treewalk.AbstractTreeIterator;
 import org.eclipse.jgit.treewalk.CanonicalTreeParser;
 import org.eclipse.jgit.util.io.DisabledOutputStream;
 
+import java.io.IOException;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -891,5 +893,37 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             logger.warn("Error querying Git-tracked projects.", e);
         }
         return projectNames;
+    }
+
+    @Override
+    protected List<String> listDocsForResourceImpl(String projectName, String resourcePath) throws Exception {
+        List<String> docs = new ArrayList<>();
+        Path projectDir = getProjectFolderPath(projectName);
+
+        if (!Files.isDirectory(projectDir)) {
+            return docs;
+        }
+
+        // Resolve and validate the resource path (prevent traversal)
+        Path resourceDir = projectDir.resolve(resourcePath).normalize();
+        if (!resourceDir.startsWith(projectDir)) {
+            logger.warn("Path traversal attempt blocked: " + resourcePath);
+            return docs;
+        }
+
+        // Only scan the resource's own directory for .md files
+        if (Files.isDirectory(resourceDir)) {
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(resourceDir, "*.md")) {
+                for (Path mdFile : stream) {
+                    if (Files.isRegularFile(mdFile)) {
+                        docs.add(projectDir.relativize(mdFile).toString());
+                    }
+                }
+            } catch (IOException e) {
+                logger.debug("Error listing docs in " + resourceDir + ": " + e.getMessage());
+            }
+        }
+
+        return docs;
     }
 }
