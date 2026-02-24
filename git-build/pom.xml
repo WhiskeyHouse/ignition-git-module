@@ -17,8 +17,6 @@
             UTC+2
         </timeZone>
         <locale>fr_FR</locale>
-        <!-- Path to gateway web components -->
-        <gateway.web.dir>${project.basedir}/../web/packages/gateway</gateway.web.dir>
         <!-- Ignition module version: major.minor.revision[-rcX][-betaX] per SDK docs -->
         <!-- CI can override with -Dmodule.version=X.Y.Z -->
         <module.version>${project.parent.version}</module.version>
@@ -49,46 +47,9 @@
 
     <build>
         <plugins>
-            <!-- Build React web components -->
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>exec-maven-plugin</artifactId>
-                <version>3.1.0</version>
-                <executions>
-                    <!-- Install npm dependencies -->
-                    <execution>
-                        <id>npm-install</id>
-                        <phase>generate-resources</phase>
-                        <goals>
-                            <goal>exec</goal>
-                        </goals>
-                        <configuration>
-                            <executable>npm</executable>
-                            <arguments>
-                                <argument>install</argument>
-                            </arguments>
-                            <workingDirectory>${gateway.web.dir}</workingDirectory>
-                        </configuration>
-                    </execution>
-                    <!-- Build React components with webpack -->
-                    <execution>
-                        <id>webpack-build</id>
-                        <phase>generate-resources</phase>
-                        <goals>
-                            <goal>exec</goal>
-                        </goals>
-                        <configuration>
-                            <executable>npm</executable>
-                            <arguments>
-                                <argument>run</argument>
-                                <argument>build</argument>
-                            </arguments>
-                            <workingDirectory>${gateway.web.dir}</workingDirectory>
-                            <skip>${skipReactBuild}</skip>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
+            <!-- React web components are built by git-gateway (exec-maven-plugin)
+                 during generate-resources, before git-gateway JAR is sealed.
+                 This ensures webpack output is included in the gateway JAR. -->
 
             <plugin>
                 <groupId>com.inductiveautomation.ignitionsdk</groupId>
