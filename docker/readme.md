@@ -1,23 +1,22 @@
-# Docker compose guide
+# Docker Compose Guide
 
-### Prerequisites :
-- Docker : https://www.docker.com/
-- Configure .env file (especially with the right COMPOSE_FILE)
+### Prerequisites
+- Docker: https://www.docker.com/
+- Configure `.env` file (especially with the right `COMPOSE_FILE`)
 
-### Classic Docker Compose :
-- Put git module in ./modules/ folder
-- Fill ./gw-ini/git.conf with right configurations
-- Fill the ./gw-secrets/GATEWAY_ADMIN_PASSWORD file with right password
-- Fill the ./gw-secrets/GATEWAY_GIT_USER_SECRET file with the right password or ssh key relative to git.conf (not necessary if the password is directly filled in git.conf, but less secure)
+### Standard Docker Compose
+- Put the Git module in `./gw-build/modules/` folder
+- Fill `./gw-init/git.yaml` with your repository configurations
+- Fill `./gw-secrets/GATEWAY_ADMIN_PASSWORD` with the gateway admin password
+- Fill `./gw-secrets/GATEWAY_GIT_USER_SECRET` with the Git user password or SSH key (not necessary if the password is directly set in `git.yaml`, but less secure)
 - Modify the docker-compose to your liking
-- Run the command line "docker compose up"
+- Run: `docker compose up`
 
-### Classic Docker Compose full automated (Derived Image Solution) :
-Based on : https://github.com/thirdgen88/ignition-derived-example
-- Fill the right version of git module in ./gw-build/Dockerfile
-    - SUPPLEMENTAL_GIT_DOWNLOAD_URL
-- Fill ./gw-ini/git.conf with right configurations
-- Fill the ./gw-secrets/GATEWAY_ADMIN_PASSWORD file with right password
-- Fill the ./gw-secrets/GATEWAY_GIT_USER_SECRET file with the right password or ssh key relative to git.conf (not necessary if the password is directly filled in git.conf, but less secure)
+### Automated Docker Compose (Derived Image Solution)
+Based on: https://github.com/thirdgen88/ignition-derived-example
+- Set the Git module download URL in `./gw-build/Dockerfile` (`SUPPLEMENTAL_GIT_DOWNLOAD_URL`)
+- Fill `./gw-init/git.yaml` with your repository configurations
+- Fill `./gw-secrets/GATEWAY_ADMIN_PASSWORD` with the gateway admin password
+- Fill `./gw-secrets/GATEWAY_GIT_USER_SECRET` with the Git user password or SSH key (not necessary if the password is directly set in `git.yaml`, but less secure)
 - Modify the docker-compose to your liking
-- Run the command line "docker compose up"
+- Run: `docker compose up`

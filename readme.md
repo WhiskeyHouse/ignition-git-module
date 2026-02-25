@@ -1,23 +1,19 @@
-# Ignition Git Module 
+# Ignition Git Module
 
 [![License](https://img.shields.io/badge/license-Beerware-green.svg)](LICENSE.md)
 
-Integrated git client in free Ignition module.
+A free Ignition module that embeds a full-featured Git client directly into the Ignition Designer. Manage commits, branches, merges, stashes, and gateway configuration — all without leaving the IDE.
 
-## Presentation
-
-The Git module is an Ignition module embedding a Git client to make its integration easier into Ignition project development.<br/>
-It permits to manage project resources throughout the development process in the Ignition designer. <br/>
-Exporting gateway configuration is simplified or even automated.
+Requires **Ignition 8.3.1+** and **Java 17+**.
 
 ## Version Compatibility
 
 | Module Version | Ignition Version | Status | Download |
 |---------------|------------------|---------|----------|
 | v1.x (≤1.0.3) | 8.1.x | ⚠️ End of Life | [v1.0.3-ignition-8.1](https://github.com/WhiskeyHouse/ignition-git-module/releases/tag/v1.0.3-ignition-8.1) |
-| v2.x (≥2.0.0) | 8.3.1+ | ✅ Active Development | Build from source |
+| v2.x (≥2.0.0) | 8.3.1+ | ✅ Active Development | [Latest Release](https://github.com/WhiskeyHouse/ignition-git-module/releases) |
 
-### ⚠️ Breaking Changes in v2.0.0
+### Breaking Changes in v2.0.0
 
 **Version 2.0.0 and higher require Ignition 8.3.1 or later** and are NOT backwards compatible with 8.1.x.
 
@@ -32,107 +28,132 @@ Exporting gateway configuration is simplified or even automated.
 
 ## Features
 
-- Link an Ignition project with a remote repo, (Gateway Webpage)
-- Link an Ignition user to a git project, with ssh or user/password authentication, (Gateway Webpage)
-- Commit resources, (Designer, on project saved or from git toolbar)
-- Push & Pull resources, (Designer, from git toolbar)
-- Export of the gateway configuration. Tags, images, theme... (Designer, from git toolbar)
-- Commit popup :<br/>
-![Commit Popup](./img/CommitPopup.png)
-- Toolbar :<br/>
-![Git Toolbar](./img/GitToolbar.png)
-- Status Bar :<br/>
-![Git Toolbar](./img/GitStatusBar.png)
-- Commissioning configuration file for easy deployment.<br/>
+### Repository Management (Gateway Web UI)
 
-## Module Documentation
-You can find the documentation of the module [HERE](https://www.axone-io.com/Files/Modules/GIT/1.0.2/doc/index.html), depending on its version.
+- **Git Projects Config** — Link Ignition projects to remote Git repositories
+- **Git Users Config** — Per-user authentication with HTTPS password or SSH key
+- **Multi-project support** — Track multiple Ignition projects independently
 
-You will also find a download link to the signed version of the module.
+### Commit & Push/Pull (Designer)
 
-## Installation for development
+- **Commit** — Select specific resources to commit with a custom message
+- **Search & filter** — Filter uncommitted changes by name, type, or author in the commit popup
+- **Push** — Push commits to the remote repository
+- **Pull** — Fetch and merge from remote, with options to import tags, themes, and images
+- **Import resources** — Import tags, themes, or images from the local repo independently, with collision policy (Overwrite, Merge, Abort)
+
+### Branch Management (Designer)
+
+- **List branches** — View all local and remote branches with ahead/behind status
+- **Switch branches** — Check out any branch, with force-checkout option
+- **Create branches** — Create new branches from the branch popup
+- **Fetch from remote** — Update remote branch metadata
+
+### Stash (Designer)
+
+- **Stash changes** — Save uncommitted work with an optional message
+- **Pop stash** — Restore previously stashed changes
+
+### Merge Conflict Resolution (Designer)
+
+- **Detect conflicts** — Automatic detection when the repository enters a merge state
+- **Resolve conflicts** — Choose "Keep Ours" or "Accept Theirs" strategy
+- **Abort merge** — Cancel and return to pre-merge state
+
+### Commit History (Designer)
+
+- **View history** — Browse the 100 most recent commits
+- **Commit details** — Hash, message, author, timestamp, and files changed
+- **Search** — Filter commits by filename
+
+### Configuration Export (Designer)
+
+- **Export gateway config** — Export tags, images, and themes to the repository
+- **Multi-project warnings** — Alerts when exporting shared gateway resources
+
+### Discard Changes (Designer)
+
+- **Discard all** — Permanently discard all uncommitted changes
+
+### Designer UI
+
+- **Toolbar** — Quick access to all Git operations from the project context menu
+- **Status bar** — Shows current branch information
+- **Documentation viewer** — Browse project markdown docs with Mermaid diagram support
+
+## Screenshots
+
+### Gateway Configuration
+
+Gateway navigation showing the Git config section:
+
+![Gateway Nav](./img/GW-nav.png)
+
+Git Projects — list of linked repositories:
+
+![Git Projects](./img/GW-Projects.png)
+
+Git Projects — edit project configuration:
+
+![Git Project Edit](./img/GW-Reporting.png)
+
+Git Users — per-project user credentials:
+
+![Git Users](./img/GW-Users.png)
+
+Git Users — edit user authentication:
+
+![Git User Edit](./img/GW-GitUsers.png)
+
+### Designer
+
+Git toolbar icons (pull, push, commit, branch, history, export, import, docs):
+
+![Git Toolbar](./img/Designer-Toolbar.png)
+
+Commit popup with search/filter and change list:
+
+![Commit Popup](./img/Designer-CommitPopup.png)
+
+Branch popup with stash, discard, and conflict resolution:
+
+![Branch Popup](./img/Designer-BranchPopup.png)
+
+Commit history viewer with file search:
+
+![Commit History](./img/Designer-CommitHistory.png)
+
+Import resources popup with collision policy:
+
+![Import Resources](./img/Designer-ImportResources.png)
+
+Documentation viewer integration in context menu:
+
+![Docs Integration](./img/Designer-DocsIntegration.png)
+
+## Installation for Development
+
 ### Prerequisites
 
-Before installing and running this project on your local machine, make sure you have installed the following :
-
-- Java (JDK >= 17) - Required for Ignition 8.3+ compatibility
+- Java (JDK >= 17) — Required for Ignition 8.3+
 - Maven
-- Node.js (>= 18) - Required for building React components
-- Java IDE (I recommend [Intellij](https://www.jetbrains.com/idea/download/))
+- Node.js (>= 18) — Required for building React components
 
-If you are using Intellij, Maven is already integrated in the IDE and you can easily download the right Java SDK from your project settings.
+### Build & Install
 
-### Installation Instructions
+1. Clone the repo: `git clone https://github.com/WhiskeyHouse/ignition-git-module.git`
+2. Build with Maven: `mvn clean package`
+3. The `.modl` file will be at `git-build/target/Git-unsigned.modl`
+4. Install the module on your gateway via **Config > System > Modules**
 
-To install and run this project on your local machine, follow these steps :
+## YAML Automated Commissioning
 
-1. Clone the repo to your local machine: `git clone https://github.com/WHK01/ignition-git-module.git`.
-2. Open the project in your preferred IDE.
-3. Build the project using Maven by running the following command: `mvn clean package`.
-4. The `.modl` file will be located in `git-build/target/`.
-5. Install the module on your gateway via Config > System > Modules.
+The module supports automated project commissioning via Docker Compose. Place a `git.yaml` file in the `gw-init` directory with your repository configurations:
 
-That's it ! You're ready to start working with the project on your local machine.
-
-## Release Pipeline
-
-This project uses automated GitHub Actions workflows for building and releasing:
-
-- **Continuous Integration**: Automatically builds and tests on PRs and main branch
-- **Automated Releases**: Tag-based releases with signed module files
-
-For detailed information about creating releases, code signing, and the release process, see [RELEASE.md](RELEASE.md).
-
-## Roadmap
-
-- Branch management,
-- Project options for select which resources export on ExportGatewayConfig :
-  - Tags, which tag provider, which folder…
-- Timestamp changes in commit popup,
-- Status page :
-  - List commit,
-  - Repos state.
-- SideDesignerBar for commit management like VisualStudioCode,
-- Find a way to find out who deleted the resources,
-- Vision project management :
-  - Auto export bin file to xml.
-- Make it impossible to create the same ignition user twice for the same project.
-
-## Contributing
-
-We're thrilled that you want to contribute to this project !<br/>
-Here are a few steps to get started :
-- Fork the repo and clone your fork to your local machine.
-- Create a branch for your feature : git checkout -b feature/describe-your-feature.
-- Make your changes or add the new feature.
-- Commit your changes, clearly explaining what you did : git commit -m "Added a new feature: describe your feature".
-- Push your changes to your fork : git push origin feature/describe-your-feature.
-- Open a pull request, explaining the changes you made and why they should be included in the project.
-
-We'll review your contribution as soon as possible and provide feedback.<br/>
-Thanks for participating !
-
-## Contact
-
-Enzo Sagnelonge - e.sagnelonge@axone-io.com
-
-AXONE-IO - contact@axone-io.com - https://www.axone-io.com/
-
-## License
-
-This project is licensed by Beerware. Please see the LICENSE.md file for more information.
-
-# YAML Automated Commissioning
-Patrick Mannion - Whiskey House of Kentucky
-
-We've forked the repo and provides a few bug fixes in addition to support multi-project import and inheritance in
-automated commissioning that can be done with this module via Docker Compose (see the [documentation](https://www.axone-io.com/Files/Modules/GIT/1.0.2/doc/index.html)). 
-
-Now, a YAML file can be provided to the `gw-init` dir in the docker compose example:
 ```yaml
 - repo_uri: https://github.com/exampleUser/my-repo-global.git
   repo_branch: development
-  ignition_projectName: Global # My base project name to be inherited by child project
+  ignition_projectName: Global
   ignition_userName: admin
   ignition_inheritable: true
   ignition_parentName: null
@@ -149,12 +170,50 @@ Now, a YAML file can be provided to the `gw-init` dir in the docker compose exam
   ignition_userName: admin
   ignition_inheritable: false
   ignition_parentName: Global
-  user_name:  my-github-username
+  user_name: my-github-username
   user_email: cooldev@myorg.com
   user_password: abc123
   commissioning_importThemes: true
   commissioning_importTags: true
   commissioning_importImages: true
 ```
-You can see a sample usage of this in the Docker example in this repo. If you want to grab a .modl from this build
-without having to launch an IDE, you may download it (signed) [here](https://whkdev01storage.blob.core.windows.net/plugpackages/Git-signed.modl)
+
+This supports multi-project import with project inheritance. See the [Docker example](docker/) in this repo for a working setup.
+
+## Release Pipeline
+
+This project uses automated GitHub Actions workflows for building and releasing:
+
+- **Continuous Integration**: Automatically builds and tests on PRs and main branch
+- **Automated Releases**: Tag-based releases with signed module files
+
+For detailed information about creating releases, code signing, and the release process, see [RELEASE.md](RELEASE.md).
+
+## Roadmap
+
+- Configurable export options (select tag providers, folders, etc.)
+- Side panel for commit management (VS Code-style)
+- Vision project management (auto-export bin files to XML)
+- Prevent duplicate user registration per project
+
+## Contributing
+
+We welcome contributions! To get started:
+
+1. Fork the repo and clone your fork
+2. Create a feature branch: `git checkout -b feature/describe-your-feature`
+3. Make your changes and commit: `git commit -m "Add: describe your feature"`
+4. Push to your fork: `git push origin feature/describe-your-feature`
+5. Open a pull request explaining your changes
+
+## Acknowledgments
+
+Originally created by Enzo Sagnelonge at [AXONE-IO](https://www.axone-io.com/). Now maintained and extended by [WhiskeyHouse](https://github.com/WhiskeyHouse).
+
+## Contact
+
+Patrick Mannion — [WhiskeyHouse](https://github.com/WhiskeyHouse)
+
+## License
+
+This project is licensed under the Beerware license. See [LICENSE.md](LICENSE.md) for details.
