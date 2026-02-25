@@ -26,8 +26,10 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -147,28 +149,76 @@ public class GitTagManager {
 
                 // Import UDT types first (in dependency order)
                 Path typesDir = providerDir.resolve(TYPES_DIR_NAME);
-                if (Files.exists(typesDir) && Files.isDirectory(typesDir)) {
+                boolean hasTypesDir = Files.exists(typesDir) && Files.isDirectory(typesDir);
+                if (hasTypesDir) {
                     importUdtTypes(tagProvider, typesDir, collisionPolicy);
                 }
 
                 // Import remaining tags (everything except _types_)
                 JsonObject reconstructed = readTagsFromDirectory(providerDir, true);
-                if (reconstructed.entrySet().isEmpty()) {
-                    logger.info("No non-UDT tags found for provider '" + providerName + "'.");
-                    continue;
+
+                // Build the set of expected root-level names (for stale tag cleanup)
+                Set<String> expectedRootNames = new HashSet<>(reconstructed.keySet());
+                if (hasTypesDir) {
+                    expectedRootNames.add(TYPES_DIR_NAME);
                 }
 
-                // Wrap in a root object for import
-                JsonObject root = new JsonObject();
-                root.add("tags", reconstructed);
+                if (!reconstructed.entrySet().isEmpty()) {
+                    // Convert tags from object format to array format for importTagsAsync
+                    JsonArray tagsArray = new JsonArray();
+                    for (Map.Entry<String, JsonElement> entry : reconstructed.entrySet()) {
+                        tagsArray.add(entry.getValue());
+                    }
 
-                String jsonStr = TAG_GSON.toJson(root);
-                tagProvider.importTagsAsync(new BasicTagPath(""), jsonStr, "JSON", collisionPolicy, null)
-                    .get(30, TimeUnit.SECONDS);
-                logger.info("Imported tags for provider '" + providerName + "' (individual files).");
+                    JsonObject root = new JsonObject();
+                    root.add("tags", tagsArray);
+
+                    String jsonStr = TAG_GSON.toJson(root);
+                    var tagResult = tagProvider.importTagsAsync(new BasicTagPath(""), jsonStr, "JSON", collisionPolicy, null)
+                        .get(30, TimeUnit.SECONDS);
+                    logger.info("Import result for provider '" + providerName + "': " + tagResult);
+                }
+
+                // Remove root-level tags that exist in the provider but not on disk
+                removeStaleRootTags(tagProvider, providerName, expectedRootNames);
             }
         } catch (Exception e) {
             logger.error("Error during individual-file tag import.", e);
+        }
+    }
+
+    /**
+     * Removes root-level tags from the provider that are not in the expected set.
+     * This ensures the provider matches the on-disk state after import.
+     */
+    private static void removeStaleRootTags(TagProvider tagProvider, String providerName,
+                                            Set<String> expectedRootNames) {
+        try {
+            var browseResults = tagProvider.browseAsync(new BasicTagPath(""), null)
+                    .get(30, TimeUnit.SECONDS);
+
+            if (browseResults == null || browseResults.getResults() == null) {
+                return;
+            }
+
+            List<TagPath> toRemove = new ArrayList<>();
+            for (var node : browseResults.getResults()) {
+                String nodeName = node.getName();
+                if (nodeName == null) {
+                    continue;
+                }
+                if (!expectedRootNames.contains(nodeName)) {
+                    toRemove.add(new BasicTagPath("", List.of(nodeName)));
+                }
+            }
+
+            if (!toRemove.isEmpty()) {
+                logger.info("Removing " + toRemove.size() + " stale root tag(s) from provider '"
+                        + providerName + "': " + toRemove);
+                tagProvider.removeTagConfigsAsync(toRemove).get(30, TimeUnit.SECONDS);
+            }
+        } catch (Exception e) {
+            logger.warn("Error removing stale tags from provider '" + providerName + "'.", e);
         }
     }
 
@@ -183,51 +233,80 @@ public class GitTagManager {
             return;
         }
 
+        // Make names unique by including path prefix so the dependency resolver
+        // doesn't deduplicate UDTs at different paths with the same base name.
+        // E.g. "ScannerCSVHandler" at paths WMS/, Util/, Equipment/DataScanners/
+        // become "WMS/ScannerCSVHandler", "Util/ScannerCSVHandler", etc.
+        for (int i = 0; i < udtArray.size(); i++) {
+            JsonObject udt = udtArray.get(i).getAsJsonObject();
+            String name = udt.has("name") ? udt.get("name").getAsString() : "";
+            String pp = udt.has("_pathPrefix") ? udt.get("_pathPrefix").getAsString() : "";
+            if (!pp.isEmpty()) {
+                udt.addProperty("name", pp + "/" + name);
+            }
+        }
+
         // Sort by dependencies so base types are imported first
         List<JsonObject> sorted = UdtDependencyResolver.sortByDependencies(udtArray);
+        logger.info("Collected " + udtArray.size() + " UDT file(s), " + sorted.size() + " after dependency resolution.");
 
         for (JsonObject udt : sorted) {
-            String name = udt.has("name") ? udt.get("name").getAsString() : "unknown";
-            String pathPrefix = udt.has("_pathPrefix") ? udt.get("_pathPrefix").getAsString() : "";
-            // Remove the internal marker before importing
+            String fullName = udt.has("name") ? udt.get("name").getAsString() : "unknown";
+            // Extract actual tag name and path prefix from the full path name
+            String name;
+            String pathPrefix;
+            if (fullName.contains("/")) {
+                name = fullName.substring(fullName.lastIndexOf('/') + 1);
+                pathPrefix = fullName.substring(0, fullName.lastIndexOf('/'));
+            } else {
+                name = fullName;
+                pathPrefix = "";
+            }
+            // Remove internal marker and restore the original tag name for Ignition
             udt.remove("_pathPrefix");
+            udt.addProperty("name", name);
             try {
                 // Build the import JSON wrapping this single UDT under _types_
-                // If pathPrefix is set (e.g. "Motor"), wrap in intermediate folder nodes
-                JsonObject innermost = new JsonObject();
-                innermost.add(name, udt);
+                // All "tags" fields must be arrays for importTagsAsync compatibility
 
-                JsonObject tagsObj = innermost;
+                // Innermost: the UDT definition itself
+                JsonArray innermostArray = new JsonArray();
+                innermostArray.add(udt);
+
+                JsonElement currentTags = innermostArray;
                 if (!pathPrefix.isEmpty()) {
                     // Build nested folders from innermost to outermost
-                    // e.g. pathPrefix "Motor/Sub" -> Folder("Sub", tags={udt}) -> Folder("Motor", tags={Sub})
+                    // e.g. pathPrefix "MES/Changeover" -> Folder("Changeover", tags=[udt]) -> Folder("MES", tags=[Changeover])
                     String[] segments = pathPrefix.split("/");
                     for (int i = segments.length - 1; i >= 0; i--) {
                         JsonObject folder = new JsonObject();
                         folder.addProperty("name", segments[i]);
                         folder.addProperty("tagType", TAG_TYPE_FOLDER);
-                        folder.add("tags", tagsObj);
-                        JsonObject outerTags = new JsonObject();
-                        outerTags.add(segments[i], folder);
-                        tagsObj = outerTags;
+                        folder.add("tags", currentTags);
+                        JsonArray outerArray = new JsonArray();
+                        outerArray.add(folder);
+                        currentTags = outerArray;
                     }
                 }
 
                 JsonObject wrapper = new JsonObject();
                 wrapper.addProperty("name", TYPES_DIR_NAME);
                 wrapper.addProperty("tagType", TAG_TYPE_FOLDER);
-                wrapper.add("tags", tagsObj);
+                wrapper.add("tags", currentTags);
+
+                JsonArray typesArray = new JsonArray();
+                typesArray.add(wrapper);
 
                 JsonObject root = new JsonObject();
-                JsonObject typesContainer = new JsonObject();
-                typesContainer.add(TYPES_DIR_NAME, wrapper);
-                root.add("tags", typesContainer);
+                root.add("tags", typesArray);
 
                 String jsonStr = TAG_GSON.toJson(root);
+                logger.info("Importing UDT type '" + name + "' with pathPrefix='" + pathPrefix + "', JSON length=" + jsonStr.length());
+                logger.debug("UDT import JSON: " + jsonStr);
                 // Block until this UDT is imported before proceeding to dependents
-                tagProvider.importTagsAsync(new BasicTagPath(""), jsonStr, "JSON", collisionPolicy, null)
+                var udtResult = tagProvider.importTagsAsync(new BasicTagPath(""), jsonStr, "JSON", collisionPolicy, null)
                     .get(30, TimeUnit.SECONDS);
-                logger.info("Imported UDT type: " + name);
+                logger.info("UDT import result for '" + name + "': " + udtResult);
             } catch (Exception e) {
                 logger.warn("Error importing UDT type '" + name + "'.", e);
             }
@@ -294,7 +373,12 @@ public class GitTagManager {
                 folder.addProperty("name", name);
                 folder.addProperty("tagType", TAG_TYPE_FOLDER);
                 if (childTags.entrySet().size() > 0) {
-                    folder.add("tags", childTags);
+                    // Convert to array format for importTagsAsync compatibility
+                    JsonArray childArray = new JsonArray();
+                    for (Map.Entry<String, JsonElement> child : childTags.entrySet()) {
+                        childArray.add(child.getValue());
+                    }
+                    folder.add("tags", childArray);
                 }
                 tags.add(name, folder);
 
