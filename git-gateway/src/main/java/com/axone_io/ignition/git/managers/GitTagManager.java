@@ -117,9 +117,10 @@ public class GitTagManager {
             if (tagProvider != null) {
                 try {
                     String json = FileUtils.readFileToString(file, StandardCharsets.UTF_8.toString());
-                    tagProvider.importTagsAsync(new BasicTagPath(""), json, "JSON", collisionPolicy, null);
+                    tagProvider.importTagsAsync(new BasicTagPath(""), json, "JSON", collisionPolicy, null)
+                        .get(30, TimeUnit.SECONDS);
                     logger.info("Imported tags for provider '" + providerName + "' (legacy format).");
-                } catch (IOException e) {
+                } catch (Exception e) {
                     logger.warn("Error importing legacy tags for provider '" + providerName + "'.", e);
                 }
             } else {
@@ -162,11 +163,12 @@ public class GitTagManager {
                 root.add("tags", reconstructed);
 
                 String jsonStr = TAG_GSON.toJson(root);
-                tagProvider.importTagsAsync(new BasicTagPath(""), jsonStr, "JSON", collisionPolicy, null);
+                tagProvider.importTagsAsync(new BasicTagPath(""), jsonStr, "JSON", collisionPolicy, null)
+                    .get(30, TimeUnit.SECONDS);
                 logger.info("Imported tags for provider '" + providerName + "' (individual files).");
             }
-        } catch (IOException e) {
-            logger.error("Error reading provider directories during individual-file import.", e);
+        } catch (Exception e) {
+            logger.error("Error during individual-file tag import.", e);
         }
     }
 
@@ -278,8 +280,9 @@ public class GitTagManager {
         for (File entry : entries) {
             String name = entry.getName();
 
-            // Skip config file
+            // Skip config and tag-groups files (tag groups are imported separately)
             if (name.equals(TAG_CONFIG_FILENAME)) continue;
+            if (name.equals(GitTagGroupManager.TAG_GROUPS_FILENAME)) continue;
 
             // Optionally skip _types_ directory (handled separately for UDT ordering)
             if (skipTypesDir && name.equals(TYPES_DIR_NAME)) continue;
