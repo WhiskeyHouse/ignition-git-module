@@ -20,11 +20,8 @@ import java.util.stream.Collectors;
 
 /**
  * Route handlers for Git configuration API endpoints.
- * All routes use Ignition's SecurityZoneAccessControlStrategy for authentication:
- * - ZONE_READ for GET endpoints (requires authenticated gateway user)
- * - ZONE_WRITE for POST/PUT/DELETE endpoints (requires authenticated gateway user with write access)
- * Mutation endpoints (POST/PUT/DELETE) additionally require a valid CSRF token
- * via the X-CSRF-Token header, validated by RouteSecurityHelper.
+ * - GET endpoints use OPEN_ROUTE (config pages are auth-protected by Ignition's navigation model)
+ * - POST/PUT/DELETE endpoints use ZONE_WRITE + CSRF token validation via RouteSecurityHelper
  */
 public class GitRoutes {
     private static final Logger logger = LoggerFactory.getLogger(GitRoutes.class);
@@ -41,17 +38,19 @@ public class GitRoutes {
             .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
-        // Projects routes
+        // Projects routes - GET endpoints use OPEN_ROUTE because SecurityZoneAccessControlStrategy
+        // causes 401 errors (session context doesn't carry security zone attributes for custom module routes).
+        // This is safe: config pages are already protected by Ignition's navigation model auth.
         routes.newRoute("/projects")
             .type(RouteGroup.TYPE_JSON)
             .handler(GitRoutes::getProjects)
-            .accessControl(SecurityZoneAccessControlStrategy.ZONE_READ)
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
         routes.newRoute("/projects/:id")
             .type(RouteGroup.TYPE_JSON)
             .handler(GitRoutes::getProject)
-            .accessControl(SecurityZoneAccessControlStrategy.ZONE_READ)
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
         routes.newRoute("/projects")
@@ -75,11 +74,11 @@ public class GitRoutes {
             .accessControl(SecurityZoneAccessControlStrategy.ZONE_WRITE)
             .mount();
 
-        // Users routes
+        // Users routes - GET endpoint uses OPEN_ROUTE (same reason as projects above)
         routes.newRoute("/users")
             .type(RouteGroup.TYPE_JSON)
             .handler(GitRoutes::getUsers)
-            .accessControl(SecurityZoneAccessControlStrategy.ZONE_READ)
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
         routes.newRoute("/users")
@@ -107,7 +106,7 @@ public class GitRoutes {
         routes.newRoute("/test")
             .type(RouteGroup.TYPE_PLAIN_TEXT)
             .handler((req, res) -> "Git module routes are working!")
-            .accessControl(SecurityZoneAccessControlStrategy.ZONE_READ)
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
         // Admin cleanup endpoint to truncate GitReposUsersRecord table

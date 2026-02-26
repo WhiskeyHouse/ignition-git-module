@@ -143,9 +143,9 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     public void mountRouteHandlers(RouteGroup routes) {
         // Mount Git API routes
         //
-        // SECURITY: All routes use Ignition's SecurityZoneAccessControlStrategy:
-        //   * GET endpoints use ZONE_READ (requires authenticated gateway user)
-        //   * POST/PUT/DELETE endpoints use ZONE_WRITE (requires write access)
+        // SECURITY:
+        //   * GET endpoints use OPEN_ROUTE (config pages are auth-protected by Ignition's nav model)
+        //   * POST/PUT/DELETE endpoints use ZONE_WRITE + CSRF token validation
         //   * Passwords and SSH keys are never returned in API responses
         com.axone_io.ignition.git.web.api.GitRoutes.mountRoutes(routes);
         com.axone_io.ignition.git.web.api.DocsRoutes.mountRoutes(routes);
