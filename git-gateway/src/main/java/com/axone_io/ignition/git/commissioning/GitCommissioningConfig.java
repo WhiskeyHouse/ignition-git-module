@@ -63,14 +63,14 @@ public class GitCommissioningConfig {
         this.repoBranch = projectConfig.getRepo_branch();
         this.ignitionProjectName = projectConfig.getIgnition_projectName();
         this.ignitionUserName = projectConfig.getIgnition_userName();
-        this.ignitionProjectInheritable = projectConfig.getIgnition_inheritable();
+        this.ignitionProjectInheritable = Boolean.TRUE.equals(projectConfig.getIgnition_inheritable());
         this.ignitionProjectParentName = projectConfig.getIgnition_parentName();
         this.userName = projectConfig.getUser_name();
         this.userEmail = projectConfig.getUser_email();
         this.userPassword = projectConfig.getUser_password();
-        this.importImages = projectConfig.getCommissioning_importImages();
-        this.importTags = projectConfig.getCommissioning_importTags();
-        this.importThemes = projectConfig.getCommissioning_importThemes();
+        this.importImages = Boolean.TRUE.equals(projectConfig.getCommissioning_importImages());
+        this.importTags = Boolean.TRUE.equals(projectConfig.getCommissioning_importTags());
+        this.importThemes = Boolean.TRUE.equals(projectConfig.getCommissioning_importThemes());
         this.initDefaultBranch = projectConfig.getInitDefaultBranch();
     }
 
