@@ -277,14 +277,10 @@ public class RouteSecurityHelper {
     public static Object getCsrfToken(RequestContext req, HttpServletResponse res) {
         try {
             HttpServletRequest httpReq = req.getRequest();
-            HttpSession session = httpReq.getSession(false);
-
-            if (session == null) {
-                res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                JsonObject error = new JsonObject();
-                error.addProperty("error", "No active session. Please log in to the Gateway.");
-                return error;
-            }
+            // Use getSession(true) to create a session if one doesn't exist.
+            // With OPEN_ROUTE access control, Ignition's data route handlers may not
+            // have an established HTTP session even when the user is logged in.
+            HttpSession session = httpReq.getSession(true);
 
             String token = getOrCreateCsrfToken(session);
 
