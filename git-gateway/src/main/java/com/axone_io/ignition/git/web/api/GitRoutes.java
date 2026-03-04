@@ -8,7 +8,6 @@ import com.inductiveautomation.ignition.gateway.dataroutes.HttpMethod;
 import com.inductiveautomation.ignition.gateway.dataroutes.RequestContext;
 import com.inductiveautomation.ignition.gateway.dataroutes.RouteGroup;
 import com.inductiveautomation.ignition.gateway.dataroutes.AccessControlStrategy;
-import com.inductiveautomation.ignition.gateway.dataroutes.SecurityZoneAccessControlStrategy;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,8 +19,23 @@ import java.util.stream.Collectors;
 
 /**
  * Route handlers for Git configuration API endpoints.
- * - GET endpoints use OPEN_ROUTE (config pages are auth-protected by Ignition's navigation model)
- * - POST/PUT/DELETE endpoints use ZONE_WRITE + CSRF token validation via RouteSecurityHelper
+ *
+ * <p>All routes use {@link AccessControlStrategy#OPEN_ROUTE} because
+ * {@code SecurityZoneAccessControlStrategy} causes 401 errors (session context
+ * doesn't carry security zone attributes for custom module routes).
+ *
+ * <p><b>Security note:</b> Ignition's navigation model auth only protects UI
+ * navigation and config page rendering — it does NOT prevent direct HTTP
+ * requests (e.g. curl) to these {@code /data/git/*} endpoints. Because all
+ * routes are registered with OPEN_ROUTE, security must be enforced server-side:
+ * <ul>
+ *   <li>POST/PUT/DELETE endpoints are wrapped with
+ *       {@link RouteSecurityHelper#requireAuthenticationAndCsrf} which validates
+ *       gateway session authentication and CSRF tokens.</li>
+ *   <li>GET endpoints are wrapped with
+ *       {@link RouteSecurityHelper#requireAuthentication} which validates
+ *       gateway session authentication (no CSRF needed for reads).</li>
+ * </ul>
  */
 public class GitRoutes {
     private static final Logger logger = LoggerFactory.getLogger(GitRoutes.class);
@@ -38,18 +52,16 @@ public class GitRoutes {
             .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
-        // Projects routes - GET endpoints use OPEN_ROUTE because SecurityZoneAccessControlStrategy
-        // causes 401 errors (session context doesn't carry security zone attributes for custom module routes).
-        // This is safe: config pages are already protected by Ignition's navigation model auth.
+        // Projects routes - GET endpoints require authentication (session check only, no CSRF)
         routes.newRoute("/projects")
             .type(RouteGroup.TYPE_JSON)
-            .handler(GitRoutes::getProjects)
+            .handler(RouteSecurityHelper.requireAuthentication(GitRoutes::getProjects))
             .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
         routes.newRoute("/projects/:id")
             .type(RouteGroup.TYPE_JSON)
-            .handler(GitRoutes::getProject)
+            .handler(RouteSecurityHelper.requireAuthentication(GitRoutes::getProject))
             .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
@@ -57,27 +69,27 @@ public class GitRoutes {
             .type(RouteGroup.TYPE_JSON)
             .method(HttpMethod.POST)
             .handler(RouteSecurityHelper.requireAuthenticationAndCsrf(GitRoutes::createProject))
-            .accessControl(SecurityZoneAccessControlStrategy.ZONE_WRITE)
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
         routes.newRoute("/projects/:id")
             .type(RouteGroup.TYPE_JSON)
             .method(HttpMethod.PUT)
             .handler(RouteSecurityHelper.requireAuthenticationAndCsrf(GitRoutes::updateProject))
-            .accessControl(SecurityZoneAccessControlStrategy.ZONE_WRITE)
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
         routes.newRoute("/projects/:id")
             .type(RouteGroup.TYPE_JSON)
             .method(HttpMethod.DELETE)
             .handler(RouteSecurityHelper.requireAuthenticationAndCsrf(GitRoutes::deleteProject))
-            .accessControl(SecurityZoneAccessControlStrategy.ZONE_WRITE)
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
-        // Users routes - GET endpoint uses OPEN_ROUTE (same reason as projects above)
+        // Users routes - GET endpoint requires authentication (exposes usernames, emails)
         routes.newRoute("/users")
             .type(RouteGroup.TYPE_JSON)
-            .handler(GitRoutes::getUsers)
+            .handler(RouteSecurityHelper.requireAuthentication(GitRoutes::getUsers))
             .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
@@ -85,21 +97,21 @@ public class GitRoutes {
             .type(RouteGroup.TYPE_JSON)
             .method(HttpMethod.POST)
             .handler(RouteSecurityHelper.requireAuthenticationAndCsrf(GitRoutes::createUser))
-            .accessControl(SecurityZoneAccessControlStrategy.ZONE_WRITE)
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
         routes.newRoute("/users/:id")
             .type(RouteGroup.TYPE_JSON)
             .method(HttpMethod.PUT)
             .handler(RouteSecurityHelper.requireAuthenticationAndCsrf(GitRoutes::updateUser))
-            .accessControl(SecurityZoneAccessControlStrategy.ZONE_WRITE)
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
         routes.newRoute("/users/:id")
             .type(RouteGroup.TYPE_JSON)
             .method(HttpMethod.DELETE)
             .handler(RouteSecurityHelper.requireAuthenticationAndCsrf(GitRoutes::deleteUser))
-            .accessControl(SecurityZoneAccessControlStrategy.ZONE_WRITE)
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
         // Test route
@@ -141,7 +153,7 @@ public class GitRoutes {
                     return error;
                 }
             }))
-            .accessControl(SecurityZoneAccessControlStrategy.ZONE_WRITE)
+            .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
         logger.info("GitRoutes.mountRoutes completed - all routes mounted successfully");
