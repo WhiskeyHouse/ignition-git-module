@@ -4,6 +4,7 @@ import com.axone_io.ignition.git.commissioning.GitCommissioningConfig;
 import com.axone_io.ignition.git.commissioning.ProjectConfig;
 import com.axone_io.ignition.git.commissioning.ProjectConfigs;
 import com.axone_io.ignition.git.managers.GitImageManager;
+import com.axone_io.ignition.git.managers.GitManager;
 import com.axone_io.ignition.git.managers.GitProjectManager;
 import com.axone_io.ignition.git.managers.GitTagManager;
 import com.axone_io.ignition.git.managers.GitThemeManager;
@@ -14,6 +15,9 @@ import com.inductiveautomation.ignition.common.resourcecollection.ResourceCollec
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.inductiveautomation.ignition.gateway.localdb.persistence.PersistenceInterface;
 import com.inductiveautomation.ignition.gateway.project.ProjectManager;
+import org.eclipse.jgit.api.*;
+import org.eclipse.jgit.lib.Ref;
+import org.eclipse.jgit.revwalk.RevCommit;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
@@ -65,16 +69,15 @@ public class GitCommissioningUtils {
                         SQuery<GitProjectsConfigRecord> configQuery = new SQuery<>(GitProjectsConfigRecord.META).eq(GitProjectsConfigRecord.ProjectName, config.getIgnitionProjectName());
                         GitProjectsConfigRecord projectsConfigRecord = persistenceInterface.queryOne(configQuery);
 
+                        // Resolve secret from env var (direct value) or file path (legacy)
+                        resolveSecretFromEnv(config, projectsConfigRecord != null && projectsConfigRecord.isSSHAuthentication());
+
                         if (projectsConfigRecord == null) {
                             // Create new config record
                             projectsConfigRecord = persistenceInterface.createNew(GitProjectsConfigRecord.META);
                             projectsConfigRecord.setProjectName(config.getIgnitionProjectName());
                             projectsConfigRecord.setURI(config.getRepoURI());
 
-                            String userSecretFilePath = System.getenv("GATEWAY_GIT_USER_SECRET_FILE");
-                            if (userSecretFilePath != null) {
-                                config.setSecretFromFilePath(Paths.get(userSecretFilePath), projectsConfigRecord.isSSHAuthentication());
-                            }
                             if (config.getSshKey() == null && config.getUserPassword() == null) {
                                 throw new Exception("Git User Password or SSHKey not configured.");
                             }
@@ -86,11 +89,6 @@ public class GitCommissioningUtils {
                         SQuery<GitReposUsersRecord> userQuery = new SQuery<>(GitReposUsersRecord.META).eq(GitReposUsersRecord.ProjectId, projectsConfigRecord.getId());
                         if (persistenceInterface.queryOne(userQuery) == null) {
                             logger.info("Creating missing GitReposUsersRecord for project '" + config.getIgnitionProjectName() + "'.");
-
-                            String userSecretFilePath = System.getenv("GATEWAY_GIT_USER_SECRET_FILE");
-                            if (userSecretFilePath != null) {
-                                config.setSecretFromFilePath(Paths.get(userSecretFilePath), projectsConfigRecord.isSSHAuthentication());
-                            }
 
                             GitReposUsersRecord reposUsersRecord = persistenceInterface.createNew(GitReposUsersRecord.META);
                             reposUsersRecord.setUserName(config.getUserName());
@@ -114,9 +112,9 @@ public class GitCommissioningUtils {
                             persistenceInterface.save(reposUsersRecord);
                         }
 
-                        // Skip project creation/cloning/importing if the project already exists
+                        // If the project already exists, sync it rather than re-cloning
                         if (projectManager.getNames().contains(gitConfig.getIgnitionProjectName())) {
-                            logger.info("Project '" + config.getIgnitionProjectName() + "' already exists, skipping clone/import.");
+                            syncExistingProject(config);
                             continue;
                         }
 
@@ -128,23 +126,8 @@ public class GitCommissioningUtils {
                         // CLONE PROJECT
                         cloneRepo(config.getIgnitionProjectName(), config.getIgnitionUserName(), config.getRepoURI(), config.getRepoBranch());
 
-                        // IMPORT PROJECT
-                        GitProjectManager.importProject(config.getIgnitionProjectName());
-
-                        // IMPORT TAGS
-                        if (config.isImportTags()) {
-                            GitTagManager.importTagManager(config.getIgnitionProjectName(), null);
-                        }
-
-                        // IMPORT THEMES
-                        if (config.isImportThemes()) {
-                            GitThemeManager.importTheme(config.getIgnitionProjectName());
-                        }
-
-                        // IMPORT IMAGES
-                        if (config.isImportImages()) {
-                            GitImageManager.importImages(config.getIgnitionProjectName());
-                        }
+                        // IMPORT PROJECT AND RESOURCES
+                        importProjectResources(config);
                     }
                 }
             } else {
@@ -152,6 +135,106 @@ public class GitCommissioningUtils {
             }
         } catch (Exception e) {
             logger.error("An error occurred while git configuration settings up from the provided YAML.", e);
+        }
+    }
+
+    /**
+     * Syncs an existing project to the state defined in git.yaml.
+     * Stashes local changes, fetches, switches branch if needed, pulls, and re-imports.
+     */
+    private static void syncExistingProject(GitCommissioningConfig config) {
+        String projectName = config.getIgnitionProjectName();
+        Path projectDir = getProjectFolderPath(projectName);
+
+        // Guard: skip if no .git directory (not a git-managed project)
+        if (!projectDir.resolve(".git").toFile().exists()) {
+            logger.warn("Project '" + projectName + "' exists but has no .git directory, skipping sync.");
+            return;
+        }
+
+        logger.info("Syncing existing project '" + projectName + "' to configured state...");
+
+        try (Git git = getGit(projectDir)) {
+            String remoteName = GitManager.getRemoteName(git);
+            String currentBranch = git.getRepository().getBranch();
+            String configuredBranch = config.getRepoBranch();
+
+            // 1. Stash uncommitted changes
+            stashIfDirty(git, projectName);
+
+            // 2. Fetch from remote
+            logger.info("Fetching from remote '" + remoteName + "' for project '" + projectName + "'...");
+            FetchCommand fetch = git.fetch().setRemote(remoteName);
+            setAuthentication(fetch, projectName, config.getIgnitionUserName());
+            fetch.call();
+
+            // 3. Switch branch if needed
+            if (!currentBranch.equals(configuredBranch)) {
+                logger.info("Switching project '" + projectName + "' from branch '" + currentBranch + "' to configured branch '" + configuredBranch + "'.");
+                boolean localBranchExists = git.branchList().call().stream()
+                        .anyMatch(ref -> ref.getName().equals("refs/heads/" + configuredBranch));
+
+                CheckoutCommand checkout = git.checkout().setName(configuredBranch);
+                if (!localBranchExists) {
+                    checkout.setCreateBranch(true)
+                            .setUpstreamMode(CreateBranchCommand.SetupUpstreamMode.TRACK)
+                            .setStartPoint(remoteName + "/" + configuredBranch);
+                }
+                checkout.call();
+            }
+
+            // 4. Pull latest
+            logger.info("Pulling latest changes for project '" + projectName + "' on branch '" + configuredBranch + "'...");
+            PullCommand pull = git.pull().setRemote(remoteName);
+            setAuthentication(pull, projectName, config.getIgnitionUserName());
+            PullResult pullResult = pull.call();
+            logger.info("Pull result for project '" + projectName + "': " + (pullResult.isSuccessful() ? "success" : "failed"));
+
+            // 5. Re-import project resources
+            importProjectResources(config);
+
+            logger.info("Sync complete for project '" + projectName + "'.");
+        } catch (Exception e) {
+            logger.error("Error syncing existing project '" + projectName + "'. Project remains in its current state.", e);
+        }
+    }
+
+    /**
+     * Stashes uncommitted changes if the working tree is dirty.
+     */
+    private static void stashIfDirty(Git git, String projectName) {
+        try {
+            Status status = git.status().call();
+            if (!status.isClean()) {
+                logger.info("Project '" + projectName + "' has uncommitted changes, stashing...");
+                RevCommit stash = git.stashCreate()
+                        .setWorkingDirectoryMessage("Auto-stash before commissioning sync")
+                        .call();
+                if (stash != null) {
+                    logger.info("Stashed uncommitted changes for project '" + projectName + "': " + stash.getName());
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to stash changes for project '" + projectName + "', continuing: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Imports project resources (project data, tags, themes, images) based on config flags.
+     */
+    private static void importProjectResources(GitCommissioningConfig config) {
+        String projectName = config.getIgnitionProjectName();
+
+        GitProjectManager.importProject(projectName);
+
+        if (config.isImportTags()) {
+            GitTagManager.importTagManager(projectName, null);
+        }
+        if (config.isImportThemes()) {
+            GitThemeManager.importTheme(projectName);
+        }
+        if (config.isImportImages()) {
+            GitImageManager.importImages(projectName);
         }
     }
 
@@ -222,6 +305,24 @@ public class GitCommissioningUtils {
             logger.error("An error occurred while fetching the YAML configuration file.", e);
         }
         return null;
+    }
+
+    /**
+     * Resolves the git user secret from environment variables.
+     * Checks GATEWAY_GIT_USER_SECRET (direct value) first, then falls back to
+     * GATEWAY_GIT_USER_SECRET_FILE (file path) for backward compatibility.
+     */
+    private static void resolveSecretFromEnv(GitCommissioningConfig config, boolean isSSHAuth) throws IOException {
+        String secret = System.getenv("GATEWAY_GIT_USER_SECRET");
+        if (secret != null) {
+            config.setSecret(secret, isSSHAuth);
+            return;
+        }
+
+        String secretFilePath = System.getenv("GATEWAY_GIT_USER_SECRET_FILE");
+        if (secretFilePath != null) {
+            config.setSecretFromFilePath(Paths.get(secretFilePath), isSSHAuth);
+        }
     }
 
     private static String yamlKeyToFieldName(String yamlKey) {
