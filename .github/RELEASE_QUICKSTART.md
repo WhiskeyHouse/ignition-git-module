@@ -68,8 +68,13 @@ Check `dry_run` to preview the version change without pushing anything.
 ## What Happens
 
 1. **Create Release** bumps versions in pom.xml + package.json, commits, tags, pushes
-2. **Release** (triggered by the tag) builds the module, signs it, creates a GitHub Release
+2. **Release** (triggered by the tag) sets the POM version from the tag, builds the module, signs it, creates a GitHub Release
 3. Pre-releases get the **Pre-release** badge on GitHub
+
+> **Note:** The Release workflow derives the build version from the git tag, not the POM.
+> If the POM version doesn't match the tag, it's automatically updated during the build.
+> This means manual tagging (e.g., `git tag v2.1.0 && git push --tags`) also works,
+> though the Create Release workflow is preferred since it keeps the POM in sync on the branch.
 
 ## Local Builds
 
@@ -93,7 +98,7 @@ jarsigner -verify -verbose git-build/target/*.modl
 | Problem | Fix |
 |---------|-----|
 | Release workflow not triggered | Check `RELEASE_PAT` secret is set and not expired |
-| POM version mismatch | Run Create Release workflow instead of manual tagging |
+| POM version drift after manual tag | Expected — the release build auto-corrects from the tag. Run Create Release next time to keep the branch POM in sync |
 | Module not signed | Check all 4 keystore secrets are configured |
 | npm build fails | Ensure Node.js 18+ is available |
 

@@ -56,16 +56,17 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Verify POM version matches tag
+      - name: Set version from tag
         run: |
-          POM_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           TAG_VERSION="${{ steps.version.outputs.tag_version }}"
+          POM_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+
           if [ "$POM_VERSION" != "$TAG_VERSION" ]; then
-            echo "Error: POM version ($POM_VERSION) does not match tag version ($TAG_VERSION)"
-            echo "Did you forget to run the create-release workflow?"
-            exit 1
+            echo "POM version ($POM_VERSION) differs from tag ($TAG_VERSION) — updating to match tag"
+            mvn versions:set -DnewVersion="$TAG_VERSION" -DgenerateBackupPoms=false -q
+          else
+            echo "POM version already matches tag: $TAG_VERSION"
           fi
-          echo "POM version matches tag: $POM_VERSION"
 
       - name: Build module
         run: |

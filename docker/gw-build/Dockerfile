@@ -1,28 +1,23 @@
 # syntax=docker/dockerfile:1.5
 ARG IGNITION_VERSION=${IGNITION_VERSION}
-FROM inductiveautomation/ignition:${IGNITION_VERSION} as prep
+FROM inductiveautomation/ignition:${IGNITION_VERSION} AS prep
 
 # Temporarily become root for system-level updates (required for 8.1.26+)
 USER root
 
-# Install some prerequisite packages
+# Install prerequisite packages
 RUN apt-get update && apt-get install -y wget ca-certificates jq zip unzip sqlite3
 
-ARG SUPPLEMENTAL_AZUREIOTINJECTOR_DOWNLOAD_URL="https://files.inductiveautomation.com/third-party/cirrus-link/4.0.15/Azure-Injector-signed.modl"
-ARG SUPPLEMENTAL_AZUREIOTINJECTOR_DOWNLOAD_SHA256="e952629cebaad75825cf6e57c09c01f5f1772065a6e87cc0cda45fdca4b29f13"
-ARG SUPPLEMENTAL_MQTTTRANSMISSION_DOWNLOAD_URL="https://files.inductiveautomation.com/third-party/cirrus-link/4.0.15/MQTT-Transmission-signed.modl"
-ARG SUPPLEMENTAL_MQTTTRANSMISSION_DOWNLOAD_SHA256="1e1e7428cba02dce6e579e6c82e4b8ad30d892438a7504aa0481eff7a5f87952"
-ARG SUPPLEMENTAL_MQTTTRANSMISSIONNIGHTLY_DOWNLOAD_URL="https://ignition-modules-nightly.s3.amazonaws.com/Ignition8/MQTT-Transmission-signed.modl"
-ARG SUPPLEMENTAL_MQTTTRANSMISSIONNIGHTLY_DOWNLOAD_SHA256="notused"
-ARG SUPPLEMENTAL_MQTTENGINE_DOWNLOAD_URL="https://files.inductiveautomation.com/third-party/cirrus-link/4.0.15/MQTT-Engine-signed.modl"
-ARG SUPPLEMENTAL_MQTTENGINE_DOWNLOAD_SHA256="5693c22b391e6da31351f2bb9245ad65e96dff9d02c0a322cb70eb11a2fb86b6"
-ARG SUPPLEMENTAL_MQTTENGINENIGHTLY_DOWNLOAD_URL="https://ignition-modules-nightly.s3.amazonaws.com/Ignition8/MQTT-Engine-signed.modl"
-ARG SUPPLEMENTAL_MQTTENGINENIGHTLY_DOWNLOAD_SHA256="notused"
-ARG SUPPLEMENTAL_MQTTDISTRIBUTOR_DOWNLOAD_URL="https://files.inductiveautomation.com/third-party/cirrus-link/4.0.15/MQTT-Distributor-signed.modl"
-ARG SUPPLEMENTAL_MQTTDISTRIBUTOR_DOWNLOAD_SHA256="5c81be13a9f749899825a99a109502c1eb28be940d060301a1ddf9967d488f9e"
-ARG SUPPLEMENTAL_MQTTDISTRIBUTORNIGHTLY_DOWNLOAD_URL="https://ignition-modules-nightly.s3.amazonaws.com/Ignition8/MQTT-Distributor-signed.modl"
-ARG SUPPLEMENTAL_MQTTDISTRIBUTORNIGHTLY_DOWNLOAD_SHA256="notused"
-ARG SUPPLEMENTAL_GIT_DOWNLOAD_URL="https://www.axone-io.com/Files/Modules/GIT/1.0.2/doc/module/Git-1.0.2.modl"
+# Example supplemental modules — uncomment and add to SUPPLEMENTAL_MODULES to include
+ARG SUPPLEMENTAL_MQTTTRANSMISSION_DOWNLOAD_URL="https://files.inductiveautomation.com/third-party/cirrus-link/5.0.2/MQTT-Transmission-signed.modl"
+ARG SUPPLEMENTAL_MQTTTRANSMISSION_DOWNLOAD_SHA256="fa6d49d7c8fea016e46ed67115752e7ea961ef742809bae138a8cb80e788a006"
+ARG SUPPLEMENTAL_MQTTENGINE_DOWNLOAD_URL="https://files.inductiveautomation.com/third-party/cirrus-link/5.0.2/MQTT-Engine-signed.modl"
+ARG SUPPLEMENTAL_MQTTENGINE_DOWNLOAD_SHA256="d03a28436f7eaa454e667dc1e59fce203813d9f65bcefbed8aba2728e99ada1b"
+ARG SUPPLEMENTAL_MQTTDISTRIBUTOR_DOWNLOAD_URL="https://files.inductiveautomation.com/third-party/cirrus-link/5.0.2/MQTT-Distributor-signed.modl"
+ARG SUPPLEMENTAL_MQTTDISTRIBUTOR_DOWNLOAD_SHA256="fa1fbf2eed734f36f3f854d568f206d46c1929a26a387b7d117d502a34238f77"
+
+# Git module — latest release from GitHub (resolved via API at build time)
+ARG SUPPLEMENTAL_GIT_DOWNLOAD_URL="https://github.com/WhiskeyHouse/ignition-git-module/releases/latest"
 ARG SUPPLEMENTAL_GIT_DOWNLOAD_SHA256="notused"
 ARG SUPPLEMENTAL_MODULES
 
@@ -32,8 +27,11 @@ SHELL [ "/usr/bin/env", "-S", "bash", "-euo", "pipefail", "-O", "inherit_errexit
 
 # Retrieve all targeted modules and verify their integrity
 COPY --chmod=0755 retrieve-modules.sh .
-RUN ./retrieve-modules.sh \
-    -m "${SUPPLEMENTAL_MODULES:-}"
+RUN --mount=type=secret,id=git-user-token \
+    bash retrieve-modules.sh \
+    -m "${SUPPLEMENTAL_MODULES:-}" && \
+    # Normalize Git module filename to match base.gwbk registration
+    for f in Git-*-unsigned.modl; do [ -f "$f" ] && mv "$f" Git-unsigned.modl; done
 
 # Set CERTIFICATES/EULAS acceptance in gateway backup config db
 COPY base.gwbk .
@@ -41,6 +39,10 @@ COPY --chmod=0755 register-module.sh register-password.sh ./
 ARG GATEWAY_ADMIN_USERNAME="admin"
 RUN --mount=type=secret,id=gateway-admin-password \
     unzip -q base.gwbk db_backup_sqlite.idb && \
+    echo "==> Build context: GATEWAY_ADMIN_USERNAME=${GATEWAY_ADMIN_USERNAME}" && \
+    if [ "${GATEWAY_ADMIN_USERNAME}" = "admin" ]; then \
+      echo "WARNING: GATEWAY_ADMIN_USERNAME is 'admin' (the default). If this is unintended, check that .env is present and readable by Docker Compose." >&2; \
+    fi && \
     shopt -s nullglob; \
     for module in *.modl; do \
     ./register-module.sh \
@@ -61,12 +63,12 @@ RUN --mount=type=secret,id=gateway-admin-password \
     fi
 
 # Final Image
-FROM inductiveautomation/ignition:${IGNITION_VERSION} as final
+FROM inductiveautomation/ignition:${IGNITION_VERSION} AS final
 
 # Temporarily become root for system-level updates (required for 8.1.26+)
 USER root
 
-# Add supplemental packages, such as git if needed/desired
+# Add supplemental packages
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     git && \

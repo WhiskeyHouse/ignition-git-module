@@ -9,11 +9,13 @@ shopt -s inherit_errexit
 ###############################################################################
 function main() {
   if [ ! -f "${SECRET_LOCATION}" ]; then
-      echo ""
-      return 0  # Silently exit if there is no secret at target path
+      echo "ERROR: Secret file not found at '${SECRET_LOCATION}'" >&2
+      echo "  The Docker build secret may not have mounted correctly." >&2
+      echo "  Ensure GATEWAY_ADMIN_PASSWORD is set in .env and Docker BuildKit is enabled." >&2
+      exit 1
   elif [ ! -f "${DB_LOCATION}" ]; then
-      echo "WARNING: ${DB_FILE} not found, skipping password registration"
-      return 0
+      echo "ERROR: ${DB_FILE} not found, cannot register admin password" >&2
+      exit 1
   fi
 
   register_password
@@ -27,12 +29,14 @@ function register_password() {
 
   echo "Registering Admin Password with Configuration DB"
 
-  # Generate Salted PW Hash
-  password_hash=$(generate_salted_hash "$(<"${SECRET_LOCATION}")")
+  # Generate Salted PW Hash (strip \r for Windows compatibility)
+  password_hash=$(generate_salted_hash "$(tr -d '\r' < "${SECRET_LOCATION}")")
 
   # Update INTERNALUSERTABLE
-  echo "  Setting default admin user to USERNAME='${GATEWAY_ADMIN_USERNAME}' and PASSWORD='${password_hash}'"
+  echo "  Setting default admin user to USERNAME='${GATEWAY_ADMIN_USERNAME}'"
   "${SQLITE3[@]}" "UPDATE INTERNALUSERTABLE SET USERNAME='${GATEWAY_ADMIN_USERNAME}', PASSWORD='${password_hash}' WHERE PROFILEID=1 AND USERID=1"
+
+  echo "  Admin credentials registered successfully (username=${GATEWAY_ADMIN_USERNAME})"
 }
 
 ###############################################################################
@@ -42,7 +46,7 @@ function generate_salted_hash() {
   local -u auth_salt
   local auth_pwhash auth_pwsalthash auth_password password_input
   password_input="${1}"
-  
+
   auth_salt=$(date +%s | sha256sum | head -c 8)
   debug "auth_salt is ${auth_salt}"
   auth_pwhash=$(printf %s "${password_input}" | sha256sum - | cut -c -64)

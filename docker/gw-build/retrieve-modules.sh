@@ -23,13 +23,80 @@ function retrieve_modules() {
         download_sha256_env="SUPPLEMENTAL_${module_install_key^^}_DOWNLOAD_SHA256"
         if [ -n "${!download_url_env:-}" ] && [ -n "${!download_sha256_env:-}" ]; then
             download_basename=$(basename "${!download_url_env}")
-            wget --ca-certificate=/etc/ssl/certs/ca-certificates.crt --referer https://inductiveautomation.com/* "${!download_url_env}" && \
-                [[ "notused" == "${!download_sha256_env}" ]] || echo "${!download_sha256_env}" "${download_basename}" | sha256sum -c -
+
+            # Skip download if file already exists (e.g., copied from local build context)
+            if [ -f "${download_basename}" ]; then
+                echo "Module ${download_basename} already exists, skipping download"
+                continue
+            fi
+
+            # Check if URL is a local path (doesn't start with http)
+            if [[ "${!download_url_env}" != http* ]]; then
+                if [ -f "${!download_url_env}" ]; then
+                    cp "${!download_url_env}" "./${download_basename}"
+                    echo "Copied local module from ${!download_url_env}"
+                else
+                    echo "Error: Local module not found at ${!download_url_env}"
+                    exit 1
+                fi
+            elif [[ "${!download_url_env}" == *"github.com"* ]]; then
+                # GitHub release assets from private repos require token auth
+                local token_file="${GITHUB_TOKEN_FILE:-/run/secrets/git-user-token}"
+                local token=""
+                local auth_header=""
+                if [ -f "$token_file" ]; then
+                    token=$(cat "$token_file")
+                    auth_header="Authorization: token ${token}"
+                fi
+
+                local resolved_url="${!download_url_env}"
+
+                # Resolve /releases/latest → actual asset URL via GitHub API
+                if [[ "$resolved_url" == */releases/latest ]]; then
+                    # Extract owner/repo from URL: https://github.com/OWNER/REPO/releases/latest
+                    local owner_repo
+                    owner_repo=$(echo "$resolved_url" | sed -E 's|https://github\.com/([^/]+/[^/]+)/releases/latest|\1|')
+                    local api_url="https://api.github.com/repos/${owner_repo}/releases/latest"
+
+                    echo "Resolving latest release for ${owner_repo}..."
+                    local release_json
+                    if [ -n "$auth_header" ]; then
+                        release_json=$(wget -q --header="$auth_header" --header="Accept: application/vnd.github+json" "$api_url" -O -)
+                    else
+                        release_json=$(wget -q --header="Accept: application/vnd.github+json" "$api_url" -O -)
+                    fi
+
+                    # Find the first .modl asset
+                    resolved_url=$(echo "$release_json" | jq -r '.assets[] | select(.name | endswith(".modl")) | .browser_download_url' | head -1)
+                    if [ -z "$resolved_url" ] || [ "$resolved_url" = "null" ]; then
+                        echo "Error: No .modl asset found in latest release of ${owner_repo}"
+                        exit 1
+                    fi
+
+                    local tag_name
+                    tag_name=$(echo "$release_json" | jq -r '.tag_name')
+                    download_basename=$(basename "$resolved_url")
+                    echo "Resolved to ${tag_name}: ${download_basename}"
+                fi
+
+                if [ -n "$auth_header" ]; then
+                    wget --header="$auth_header" \
+                         --header="Accept: application/octet-stream" \
+                         "$resolved_url" -O "${download_basename}"
+                else
+                    echo "Warning: No GitHub token found at ${token_file}, attempting unauthenticated download"
+                    wget "$resolved_url" -O "${download_basename}"
+                fi
+            else
+                wget --ca-certificate=/etc/ssl/certs/ca-certificates.crt --referer https://inductiveautomation.com/* "${!download_url_env}"
+            fi
+
+            [[ "notused" == "${!download_sha256_env}" ]] || echo "${!download_sha256_env}" "${download_basename}" | sha256sum -c -
         else
             echo "Error finding specified module ${module_install_key} in build args, aborting..."
             exit 1
         fi
-    done  
+    done
 }
 
 ###############################################################################
@@ -79,10 +146,10 @@ done
 # shift positional args based on number consumed by getopts
 shift $((OPTIND-1))
 
-# exit on missing required args
+# exit on missing required args - allow empty for optional modules
 if [ -z "${SUPPLEMENTAL_MODULES:-}" ]; then
-  usage
-  exit 1
+  echo "No supplemental modules specified, skipping module retrieval"
+  exit 0
 fi
 
 main

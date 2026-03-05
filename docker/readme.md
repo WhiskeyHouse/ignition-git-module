@@ -4,35 +4,59 @@ This guide covers deploying the Ignition Git Module using Docker Compose, includ
 
 ## Prerequisites
 
-- [Docker](https://www.docker.com/) installed
-- Configure the `.env` file (especially `COMPOSE_FILE` to select which compose variant to use)
+- [Docker](https://www.docker.com/) with BuildKit enabled (default in Docker Desktop)
+- A `.env` file with gateway credentials and Git authentication
 
 ## Quick Start
 
-1. Place the Git module `.modl` file in `./modules/` (standard) or configure the download URL in `./gw-build/Dockerfile` (automated)
+1. Create a `.env` file with your credentials:
+   ```env
+   IGNITION_VERSION=8.3.3
+   GATEWAY_ADMIN_USERNAME=admin
+   GATEWAY_ADMIN_PASSWORD=password
+   GATEWAY_GIT_USER_SECRET=ghp_xxxxxxxxxxxxxxxxxxxx
+   ```
 2. Configure `./gw-init/git.yaml` with your project repositories (see [YAML Configuration](#yaml-configuration))
-3. Set the gateway admin password in `./gw-secrets/GATEWAY_ADMIN_PASSWORD`
-4. Set `GATEWAY_GIT_USER_SECRET` in `.env` with the Git user password or PAT
-5. Run: `docker compose up`
+3. Choose a compose variant and start:
+   ```bash
+   # Standard — mount a pre-built .modl file
+   docker compose up
+
+   # Automated — build an image that downloads the latest release
+   docker compose -f docker-compose-automated.yml up
+   ```
 
 ## Compose Variants
 
 ### Standard (`docker-compose.yml`)
 
-Mounts a pre-built `.modl` file directly into the container. Requires you to place the module file in `./modules/`.
+Mounts a pre-built `.modl` file directly into the container. Place the module in `./modules/Git-unsigned.modl`.
+
+Download the latest release from the [releases page](https://github.com/WhiskeyHouse/ignition-git-module/releases).
 
 ### Automated (`docker-compose-automated.yml`)
 
-Builds a derived Ignition image that downloads and installs the module at build time. Set the download URL via `SUPPLEMENTAL_GIT_DOWNLOAD_URL` in `./gw-build/Dockerfile`.
+Builds a derived Ignition image that downloads and installs the latest Git module release at build time. The Dockerfile uses the GitHub Releases API to resolve the latest `.modl` asset automatically — no URL updates needed when new versions are published.
 
-Select the variant by setting `COMPOSE_FILE` in `.env`:
+To pin to a specific version instead, override the build ARG:
+
+```yaml
+# docker-compose-automated.yml
+build:
+  args:
+    SUPPLEMENTAL_GIT_DOWNLOAD_URL: "https://github.com/WhiskeyHouse/ignition-git-module/releases/download/v2.0.0/Git-2.0.0-unsigned.modl"
+```
+
+## Gateway Credentials
+
+Both `GATEWAY_ADMIN_USERNAME` and `GATEWAY_ADMIN_PASSWORD` are set via environment variables in `.env`. These are passed to the container as runtime env vars so Ignition applies them during commissioning (first boot).
+
+The automated variant also passes `GATEWAY_ADMIN_PASSWORD` as a BuildKit secret to bake credentials into the `.gwbk` at build time. Both paths use the same `.env` value — no separate secrets files needed.
 
 ```env
-# Standard
-COMPOSE_FILE=docker-compose.yml
-
-# Automated
-COMPOSE_FILE=docker-compose-automated.yml
+# .env
+GATEWAY_ADMIN_USERNAME=your-email@example.com
+GATEWAY_ADMIN_PASSWORD=your-password
 ```
 
 ## YAML Configuration
@@ -52,7 +76,7 @@ The file is a YAML list. Each entry configures one project:
   ignition_parentName: null
   user_name: git-username
   user_email: user@example.com
-  user_password: <set via env var instead>
+  user_password: placeholder
   commissioning_importThemes: true
   commissioning_importTags: true
   commissioning_importImages: true
@@ -71,7 +95,7 @@ The file is a YAML list. Each entry configures one project:
 | `ignition_parentName` | No | String | Parent project name for project inheritance |
 | `user_name` | Yes | String | Git username for authentication |
 | `user_email` | Yes | String | Git user email (used for commit authoring) |
-| `user_password` | Yes* | String | Git password or Personal Access Token. *Prefer using `GATEWAY_GIT_USER_SECRET` env var instead |
+| `user_password` | Yes* | String | Git password or Personal Access Token. *Prefer using `GATEWAY_GIT_USER_SECRET` env var instead — set this to `placeholder` and the env var overrides it at runtime |
 | `commissioning_importThemes` | No | Boolean | Import theme resources on commissioning (default: `false`) |
 | `commissioning_importTags` | No | Boolean | Import tag provider resources on commissioning (default: `false`) |
 | `commissioning_importImages` | No | Boolean | Import image resources on commissioning (default: `false`) |
@@ -88,7 +112,7 @@ You can commission multiple projects by adding entries to the YAML list:
   ignition_userName: admin
   user_name: git-user
   user_email: user@example.com
-  user_password: <via env>
+  user_password: placeholder
   commissioning_importThemes: true
   commissioning_importTags: true
   commissioning_importImages: true
@@ -101,7 +125,7 @@ You can commission multiple projects by adding entries to the YAML list:
   ignition_parentName: Global
   user_name: git-user
   user_email: user@example.com
-  user_password: <via env>
+  user_password: placeholder
   commissioning_importThemes: true
   commissioning_importTags: false
   commissioning_importImages: true
@@ -252,3 +276,11 @@ cd /usr/local/bin/ignition/data/projects/<project-name>
 git stash list      # View stashed changes
 git stash pop       # Restore most recent stash
 ```
+
+### Build fails with "Secret file not found"
+
+The automated variant requires `GATEWAY_ADMIN_PASSWORD` to be set in `.env`. The build mounts it as a BuildKit secret. If the variable is empty or missing, `register-password.sh` will fail with a clear error message pointing to the fix.
+
+### Windows line endings
+
+If building on Windows, ensure `.env` and any secret files use Unix line endings (`LF`, not `CRLF`). The build scripts strip `\r` from secrets, but `.env` parsing may still be affected. Most editors can be configured to save with LF endings.
