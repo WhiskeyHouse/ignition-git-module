@@ -18,6 +18,9 @@ jobs:
       contents: write
       packages: write
 
+    env:
+      HAS_KEYSTORE: ${{ secrets.KEYSTORE_BASE64 != '' }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -66,7 +69,7 @@ jobs:
       # Decode keystore before build so Maven -Psign profile can use it
       - name: Decode keystore
         id: keystore
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        if: env.HAS_KEYSTORE == 'true'
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > ${{ runner.temp }}/keystore.jks
           echo "available=true" >> $GITHUB_OUTPUT
