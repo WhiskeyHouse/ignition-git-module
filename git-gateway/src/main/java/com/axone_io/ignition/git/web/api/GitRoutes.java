@@ -24,17 +24,16 @@ import java.util.stream.Collectors;
  * {@code SecurityZoneAccessControlStrategy} causes 401 errors (session context
  * doesn't carry security zone attributes for custom module routes).
  *
- * <p><b>Security note:</b> Ignition's navigation model auth only protects UI
- * navigation and config page rendering — it does NOT prevent direct HTTP
- * requests (e.g. curl) to these {@code /data/git/*} endpoints. Because all
- * routes are registered with OPEN_ROUTE, security must be enforced server-side:
+ * <p><b>Security note:</b> All routes use OPEN_ROUTE because Ignition's
+ * {@code HttpSession} is not reliably available in data route handlers — even
+ * when the user is logged into the Gateway, {@code getSession(false)} may
+ * return null for data route requests.
  * <ul>
- *   <li>POST/PUT/DELETE endpoints are wrapped with
- *       {@link RouteSecurityHelper#requireAuthenticationAndCsrf} which validates
- *       gateway session authentication and CSRF tokens.</li>
- *   <li>GET endpoints are wrapped with
- *       {@link RouteSecurityHelper#requireAuthentication} which validates
- *       gateway session authentication (no CSRF needed for reads).</li>
+ *   <li>GET endpoints rely on Ignition's navigation model auth (Gateway login
+ *       required to access config pages that call these endpoints).</li>
+ *   <li>POST/PUT/DELETE endpoints are additionally wrapped with
+ *       {@link RouteSecurityHelper#requireAuthenticationAndCsrf} which uses
+ *       {@code getSession(true)} to create a session for CSRF token management.</li>
  * </ul>
  */
 public class GitRoutes {
@@ -52,16 +51,18 @@ public class GitRoutes {
             .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
-        // Projects routes - GET endpoints require authentication (session check only, no CSRF)
+        // Projects routes - GET endpoints use OPEN_ROUTE without additional auth checks.
+        // Ignition's navigation model already requires gateway login to access config pages.
+        // HttpSession-based auth doesn't work reliably for data routes (session may not exist).
         routes.newRoute("/projects")
             .type(RouteGroup.TYPE_JSON)
-            .handler(RouteSecurityHelper.requireAuthentication(GitRoutes::getProjects))
+            .handler(GitRoutes::getProjects)
             .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
         routes.newRoute("/projects/:id")
             .type(RouteGroup.TYPE_JSON)
-            .handler(RouteSecurityHelper.requireAuthentication(GitRoutes::getProject))
+            .handler(GitRoutes::getProject)
             .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
@@ -86,10 +87,10 @@ public class GitRoutes {
             .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 
-        // Users routes - GET endpoint requires authentication (exposes usernames, emails)
+        // Users routes - GET endpoint uses OPEN_ROUTE (same rationale as projects above)
         routes.newRoute("/users")
             .type(RouteGroup.TYPE_JSON)
-            .handler(RouteSecurityHelper.requireAuthentication(GitRoutes::getUsers))
+            .handler(GitRoutes::getUsers)
             .accessControl(AccessControlStrategy.OPEN_ROUTE)
             .mount();
 

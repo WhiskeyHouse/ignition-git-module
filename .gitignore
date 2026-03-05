@@ -3,6 +3,7 @@
 
 # Ignition Module files
 #*.modl
+docker/gw-build/*.modl
 
 # Java class files
 *.class
