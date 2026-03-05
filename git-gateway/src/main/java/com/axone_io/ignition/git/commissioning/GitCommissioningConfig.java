@@ -77,10 +77,16 @@ public class GitCommissioningConfig {
     public void setSecretFromFilePath(Path filePath, boolean isSSHAuth) throws IOException {
         if (filePath.toFile().exists() && filePath.toFile().isFile()) {
             String secret = Files.readString(filePath, StandardCharsets.UTF_8).trim();
+            setSecret(secret, isSSHAuth);
+        }
+    }
+
+    public void setSecret(String secret, boolean isSSHAuth) {
+        if (secret != null && !secret.trim().isEmpty()) {
             if (isSSHAuth) {
-                this.sshKey = secret;
+                this.sshKey = secret.trim();
             } else {
-                this.userPassword = secret;
+                this.userPassword = secret.trim();
             }
         }
     }

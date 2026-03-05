@@ -2,6 +2,7 @@ package com.axone_io.ignition.git;
 
 import com.axone_io.ignition.git.commissioning.utils.GitCommissioningUtils;
 import com.axone_io.ignition.git.managers.GitImageManager;
+import com.axone_io.ignition.git.managers.GitManager;
 import com.axone_io.ignition.git.managers.GitProjectManager;
 import com.axone_io.ignition.git.managers.GitTagManager;
 import com.axone_io.ignition.git.managers.GitThemeManager;
@@ -508,21 +509,10 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     }
 
     /**
-     * Gets the remote name for a repository. Returns the first configured remote,
-     * or "origin" as fallback if no remotes are configured.
+     * Gets the remote name for a repository. Delegates to GitManager.
      */
     private String getRemoteName(Git git) {
-        try {
-            var remotes = git.getRepository().getRemoteNames();
-            if (remotes != null && !remotes.isEmpty()) {
-                String remoteName = remotes.iterator().next();
-                logger.debug("Using remote: " + remoteName);
-                return remoteName;
-            }
-        } catch (Exception e) {
-            logger.warn("Error getting remote name, falling back to 'origin': " + e.getMessage());
-        }
-        return "origin";
+        return GitManager.getRemoteName(git);
     }
 
     @Override

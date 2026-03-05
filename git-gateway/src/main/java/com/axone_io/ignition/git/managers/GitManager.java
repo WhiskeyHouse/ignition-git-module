@@ -283,6 +283,24 @@ public class GitManager {
         return new ResourcePath(new ResourceType(moduleId, typeId), resource);
     }
 
+    /**
+     * Gets the remote name for a repository. Returns the first configured remote,
+     * or "origin" as fallback if no remotes are configured.
+     */
+    public static String getRemoteName(Git git) {
+        try {
+            var remotes = git.getRepository().getRemoteNames();
+            if (remotes != null && !remotes.isEmpty()) {
+                String remoteName = remotes.iterator().next();
+                logger.debug("Using remote: " + remoteName);
+                return remoteName;
+            }
+        } catch (Exception e) {
+            logger.warn("Error getting remote name, falling back to 'origin': " + e.getMessage());
+        }
+        return "origin";
+    }
+
     public static void disableSsl(Git git) throws IOException {
         StoredConfig config = git.getRepository().getConfig();
         config.setBoolean("http", null, "sslVerify", false);

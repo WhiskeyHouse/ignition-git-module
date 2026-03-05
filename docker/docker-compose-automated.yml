@@ -19,7 +19,7 @@ services:
       - ACCEPT_IGNITION_EULA=Y
       #- GATEWAY_ADMIN_USERNAME=admin
       #- GATEWAY_ADMIN_PASSWORD_FILE=/run/secrets/gateway-admin-password
-      - GATEWAY_GIT_USER_SECRET_FILE=/run/secrets/gateway-git-user-secret
+      - GATEWAY_GIT_USER_SECRET=${GATEWAY_GIT_USER_SECRET}
       - IGNITION_EDITION=standard
     networks:
       - default
@@ -27,7 +27,6 @@ services:
       - gateway_data:/usr/local/bin/ignition/data
       - ./gw-init/git.yaml:/usr/local/bin/ignition/data/git.yaml
     secrets:
-      - gateway-git-user-secret
       - gateway-admin-password
     command: >
       -n Ignition-DevOps
@@ -36,8 +35,6 @@ networks:
   default:
 
 secrets:
-  gateway-git-user-secret:
-    file: gw-secrets/GATEWAY_GIT_USER_SECRET
   gateway-admin-password:
     file: gw-secrets/GATEWAY_ADMIN_PASSWORD
 
