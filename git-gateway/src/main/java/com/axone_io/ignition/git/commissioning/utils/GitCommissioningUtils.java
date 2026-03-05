@@ -114,11 +114,24 @@ public class GitCommissioningUtils {
 
                         // If the project already exists, sync it rather than re-cloning
                         if (projectManager.getNames().contains(gitConfig.getIgnitionProjectName())) {
+                            logger.info("Project '" + config.getIgnitionProjectName() + "' already exists, syncing...");
                             syncExistingProject(config);
                             continue;
                         }
 
-                        projectManager.create(config.getIgnitionProjectName(), new ResourceCollectionManifest(config.getIgnitionProjectName(), "", false, config.isIgnitionProjectInheritable(), config.getIgnitionProjectParentName()), new ArrayList<>());
+                        // Create new project — catch "already exists" as a fallback in case
+                        // getNames() didn't include it (observed in some Ignition versions)
+                        try {
+                            projectManager.create(config.getIgnitionProjectName(), new ResourceCollectionManifest(config.getIgnitionProjectName(), "", false, config.isIgnitionProjectInheritable(), config.getIgnitionProjectParentName()), new ArrayList<>());
+                        } catch (Exception createEx) {
+                            String msg = createEx.getMessage() != null ? createEx.getMessage() : "";
+                            if (msg.contains("already exists") || createEx.getClass().getSimpleName().contains("Conflict")) {
+                                logger.warn("Project '" + config.getIgnitionProjectName() + "' already exists (missed by getNames check), falling back to sync.");
+                                syncExistingProject(config);
+                                continue;
+                            }
+                            throw createEx;
+                        }
 
                         Path projectDir = getProjectFolderPath(config.getIgnitionProjectName());
                         clearDirectory(projectDir);

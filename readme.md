@@ -159,7 +159,7 @@ The module supports automated project commissioning via Docker Compose. Place a 
   ignition_parentName: null
   user_name: my-github-username
   user_email: cooldev@myorg.com
-  user_password: abc123
+  user_password: placeholder  # Real token provided via GATEWAY_GIT_USER_SECRET env var
   commissioning_importThemes: true
   commissioning_importTags: true
   commissioning_importImages: true
@@ -172,7 +172,7 @@ The module supports automated project commissioning via Docker Compose. Place a 
   ignition_parentName: Global
   user_name: my-github-username
   user_email: cooldev@myorg.com
-  user_password: abc123
+  user_password: placeholder  # Real token provided via GATEWAY_GIT_USER_SECRET env var
   commissioning_importThemes: true
   commissioning_importTags: true
   commissioning_importImages: true

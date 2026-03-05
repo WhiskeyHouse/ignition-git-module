@@ -44,8 +44,12 @@ function retrieve_modules() {
                 local token_file="${GITHUB_TOKEN_FILE:-/run/secrets/git-user-token}"
                 local token=""
                 local auth_header=""
-                if [ -f "$token_file" ]; then
-                    token=$(cat "$token_file")
+                if [ -f "$token_file" ] && [ -s "$token_file" ]; then
+                    token=$(tr -d '\r\n' < "$token_file")
+                elif [ -n "${GIT_USER_TOKEN:-}" ]; then
+                    token="${GIT_USER_TOKEN}"
+                fi
+                if [ -n "$token" ]; then
                     auth_header="Authorization: token ${token}"
                 fi
 
@@ -59,12 +63,23 @@ function retrieve_modules() {
                     local api_url="https://api.github.com/repos/${owner_repo}/releases/latest"
 
                     echo "Resolving latest release for ${owner_repo}..."
-                    local release_json
-                    if [ -n "$auth_header" ]; then
-                        release_json=$(wget -q --header="$auth_header" --header="Accept: application/vnd.github+json" "$api_url" -O -)
-                    else
-                        release_json=$(wget -q --header="Accept: application/vnd.github+json" "$api_url" -O -)
+                    local release_json_file="/tmp/gh_release_$$.json"
+                    # Try unauthenticated first (works for public repos), fall back to auth
+                    if ! wget --header="Accept: application/vnd.github+json" "$api_url" -O "$release_json_file" 2>/dev/null; then
+                        if [ -n "$auth_header" ]; then
+                            echo "  Retrying with authentication..."
+                            wget --header="Accept: application/vnd.github+json" --header="$auth_header" "$api_url" -O "$release_json_file" || {
+                                echo "ERROR: GitHub API request failed for ${api_url}" >&2
+                                exit 1
+                            }
+                        else
+                            echo "ERROR: GitHub API request failed for ${api_url}" >&2
+                            echo "  If this is a private repo, set GIT_USER_TOKEN in .env." >&2
+                            exit 1
+                        fi
                     fi
+                    local release_json
+                    release_json=$(<"$release_json_file")
 
                     # Find the first .modl asset
                     resolved_url=$(echo "$release_json" | jq -r '.assets[] | select(.name | endswith(".modl")) | .browser_download_url' | head -1)

@@ -20,6 +20,8 @@ ARG SUPPLEMENTAL_MQTTDISTRIBUTOR_DOWNLOAD_SHA256="fa1fbf2eed734f36f3f854d568f206
 ARG SUPPLEMENTAL_GIT_DOWNLOAD_URL="https://github.com/WhiskeyHouse/ignition-git-module/releases/latest"
 ARG SUPPLEMENTAL_GIT_DOWNLOAD_SHA256="notused"
 ARG SUPPLEMENTAL_MODULES
+# Fallback for BuildKit secret — safe because prep stage is discarded (multi-stage build)
+ARG GIT_USER_TOKEN=""
 
 # Set working directory for this prep image and ensure that exits from sub-shells bubble up and report an error
 WORKDIR /root

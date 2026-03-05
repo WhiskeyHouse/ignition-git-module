@@ -8,6 +8,7 @@ services:
         IGNITION_VERSION: ${IGNITION_VERSION:-8.3.3}
         SUPPLEMENTAL_MODULES: "git"
         GATEWAY_ADMIN_USERNAME: ${GATEWAY_ADMIN_USERNAME:-admin}
+        GIT_USER_TOKEN: ${GATEWAY_GIT_USER_SECRET}
       secrets:
         - gateway-admin-password
         - git-user-token

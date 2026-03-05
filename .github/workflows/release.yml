@@ -17,8 +17,6 @@ jobs:
     permissions:
       contents: write
       packages: write
-    env:
-      HAS_KEYSTORE: ${{ secrets.KEYSTORE_BASE64 != '' }}
 
     steps:
       - name: Checkout code
@@ -30,7 +28,6 @@ jobs:
           TAG_VERSION="${GITHUB_REF#refs/tags/v}"
           echo "tag_version=$TAG_VERSION" >> $GITHUB_OUTPUT
 
-          # Detect pre-release: contains a hyphen after the version triplet
           if [[ "$TAG_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-.+ ]]; then
             echo "is_prerelease=true" >> $GITHUB_OUTPUT
             echo "Detected pre-release: $TAG_VERSION"
@@ -38,8 +35,6 @@ jobs:
             echo "is_prerelease=false" >> $GITHUB_OUTPUT
             echo "Detected stable release: $TAG_VERSION"
           fi
-
-          echo "Tag version for module: $TAG_VERSION"
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
@@ -68,70 +63,52 @@ jobs:
             echo "POM version already matches tag: $TAG_VERSION"
           fi
 
-      - name: Build module
-        run: |
-          mvn clean package -DskipTests -Dmodule.version=${{ steps.version.outputs.tag_version }}
-        env:
-          JAVA_HOME: ${{ env.JAVA_HOME }}
-
-      - name: Preserve unsigned module
-        run: |
-          cd git-build/target
-          MODL_FILE=$(ls *.modl | head -1)
-          if [ -n "$MODL_FILE" ]; then
-            cp "$MODL_FILE" "Git-${{ steps.version.outputs.tag_version }}-unsigned.modl"
-            echo "Preserved unsigned module: Git-${{ steps.version.outputs.tag_version }}-unsigned.modl"
-            ls -lh "Git-${{ steps.version.outputs.tag_version }}-unsigned.modl"
-          else
-            echo "Error: No .modl file found"
-            exit 1
-          fi
-
+      # Decode keystore before build so Maven -Psign profile can use it
       - name: Decode keystore
-        if: env.HAS_KEYSTORE == 'true'
+        id: keystore
+        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > ${{ runner.temp }}/keystore.jks
+          echo "available=true" >> $GITHUB_OUTPUT
 
-      - name: Sign module
-        if: env.HAS_KEYSTORE == 'true'
+      - name: Build and sign module
         run: |
-          cd git-build/target
-          MODL_FILE=$(ls *.modl | grep -v "unsigned" | head -1)
-          if [ -n "$MODL_FILE" ]; then
-            jarsigner -keystore ${{ runner.temp }}/keystore.jks \
-              -storepass "${{ secrets.KEYSTORE_STOREPASS }}" \
-              -keypass "${{ secrets.KEYSTORE_KEYPASS }}" \
-              -verbose \
-              "$MODL_FILE" \
-              "${{ secrets.KEYSTORE_ALIAS }}"
-            echo "Signed module: $MODL_FILE"
+          TAG_VERSION="${{ steps.version.outputs.tag_version }}"
+          MVN_ARGS="clean package -DskipTests -Dmodule.version=$TAG_VERSION"
+
+          if [ "${{ steps.keystore.outputs.available }}" = "true" ]; then
+            echo "Building with code signing enabled (-Psign)"
+            mvn $MVN_ARGS -Psign \
+              -Dkeystore.path=${{ runner.temp }}/keystore.jks \
+              -Dkeystore.alias="${{ secrets.KEYSTORE_ALIAS }}" \
+              -Dkeystore.storepass="${{ secrets.KEYSTORE_STOREPASS }}" \
+              -Dkeystore.keypass="${{ secrets.KEYSTORE_KEYPASS }}"
           else
-            echo "Error: No .modl file found to sign"
-            exit 1
-          fi
-        env:
-          JAVA_HOME: ${{ env.JAVA_HOME }}
-
-      - name: Verify signed module
-        if: env.HAS_KEYSTORE == 'true'
-        run: |
-          cd git-build/target
-          MODL_FILE=$(ls *.modl | grep -v "unsigned" | head -1)
-          if [ -n "$MODL_FILE" ]; then
-            jarsigner -verify -verbose -certs "$MODL_FILE"
-            echo "Module signature verified successfully"
+            echo "::warning::Building WITHOUT code signing — configure KEYSTORE_BASE64 secret to enable"
+            mvn $MVN_ARGS
           fi
 
-      - name: Rename signed module
-        if: env.HAS_KEYSTORE == 'true'
+      - name: Verify signature
+        if: steps.keystore.outputs.available == 'true'
         run: |
+          jarsigner -verify -verbose -certs git-build/target/Git-unsigned.modl
+          echo "Module signature verified"
+
+      - name: Prepare release artifacts
+        id: artifacts
+        run: |
+          TAG_VERSION="${{ steps.version.outputs.tag_version }}"
           cd git-build/target
-          MODL_FILE=$(ls *.modl | grep -v "unsigned" | head -1)
-          if [ -n "$MODL_FILE" ]; then
-            mv "$MODL_FILE" "Git-${{ steps.version.outputs.tag_version }}-signed.modl"
-            echo "Renamed signed module: Git-${{ steps.version.outputs.tag_version }}-signed.modl"
-            ls -lh Git-*.modl
+
+          if [ "${{ steps.keystore.outputs.available }}" = "true" ]; then
+            cp Git-unsigned.modl "Git-${TAG_VERSION}-signed.modl"
+            echo "release_modl=git-build/target/Git-${TAG_VERSION}-signed.modl" >> $GITHUB_OUTPUT
+          else
+            cp Git-unsigned.modl "Git-${TAG_VERSION}-unsigned.modl"
+            echo "release_modl=git-build/target/Git-${TAG_VERSION}-unsigned.modl" >> $GITHUB_OUTPUT
           fi
+
+          ls -lh Git-${TAG_VERSION}-*.modl
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -178,15 +155,9 @@ jobs:
               f.write(pom)
           PYEOF
 
-          if [ -f "git-build/target/Git-${VERSION}-signed.modl" ]; then
-            MODL_FILE="git-build/target/Git-${VERSION}-signed.modl"
-          else
-            MODL_FILE="git-build/target/Git-${VERSION}-unsigned.modl"
-          fi
-
           mvn deploy:deploy-file \
             -DpomFile="${POM_FILE}" \
-            -Dfile="$MODL_FILE" \
+            -Dfile="${RELEASE_MODL}" \
             -DrepositoryId=github \
             -Durl="https://maven.pkg.github.com/${REPO}"
         env:
@@ -195,6 +166,7 @@ jobs:
           NOTES_FILE: ${{ runner.temp }}/release-notes.md
           POM_FILE: ${{ runner.temp }}/deploy-pom.xml
           REPO: ${{ github.repository }}
+          RELEASE_MODL: ${{ steps.artifacts.outputs.release_modl }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
@@ -208,6 +180,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Clean up keystore
-        if: always() && env.HAS_KEYSTORE == 'true'
+        if: always() && steps.keystore.outputs.available == 'true'
         run: |
           rm -f ${{ runner.temp }}/keystore.jks
