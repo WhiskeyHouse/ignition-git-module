@@ -1,5 +1,6 @@
 package com.axone_io.ignition.git;
 
+import com.axone_io.ignition.git.dto.ProductionModeConfig;
 import com.inductiveautomation.ignition.common.rpc.RpcInterface;
 import java.util.List;
 
@@ -42,5 +43,13 @@ public interface GitScriptInterface {
 
     // Docs discovery
     List<String> listDocsForResource(String projectName, String resourcePath) throws Exception;
+
+    // Production mode operations
+    ProductionModeConfig getProductionModeConfig(String projectName) throws Exception;
+    boolean validateProductionModePull(String projectName, String userName) throws Exception;
+    boolean validateProductionModePush(String projectName, String userName, String targetBranch) throws Exception;
+    List<String> listRepositoryTags(String projectName) throws Exception;
+    boolean backupCurrentTags(String projectName) throws Exception;
+    boolean restoreTagsFromBackup(String projectName) throws Exception;
 
 }

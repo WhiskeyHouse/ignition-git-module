@@ -1,5 +1,7 @@
 package com.axone_io.ignition.git;
 
+import com.axone_io.ignition.git.dto.ProductionModeConfig;
+
 import java.util.List;
 
 public class ClientScriptModule extends AbstractScriptModule {
@@ -129,5 +131,35 @@ public class ClientScriptModule extends AbstractScriptModule {
     @Override
     protected List<String> listDocsForResourceImpl(String projectName, String resourcePath) throws Exception {
         return rpc.listDocsForResource(projectName, resourcePath);
+    }
+
+    @Override
+    protected ProductionModeConfig getProductionModeConfigImpl(String projectName) throws Exception {
+        return rpc.getProductionModeConfig(projectName);
+    }
+
+    @Override
+    protected boolean validateProductionModePullImpl(String projectName, String userName) throws Exception {
+        return rpc.validateProductionModePull(projectName, userName);
+    }
+
+    @Override
+    protected boolean validateProductionModePushImpl(String projectName, String userName, String targetBranch) throws Exception {
+        return rpc.validateProductionModePush(projectName, userName, targetBranch);
+    }
+
+    @Override
+    protected List<String> listRepositoryTagsImpl(String projectName) throws Exception {
+        return rpc.listRepositoryTags(projectName);
+    }
+
+    @Override
+    protected boolean backupCurrentTagsImpl(String projectName) throws Exception {
+        return rpc.backupCurrentTags(projectName);
+    }
+
+    @Override
+    protected boolean restoreTagsFromBackupImpl(String projectName) throws Exception {
+        return rpc.restoreTagsFromBackup(projectName);
     }
 }

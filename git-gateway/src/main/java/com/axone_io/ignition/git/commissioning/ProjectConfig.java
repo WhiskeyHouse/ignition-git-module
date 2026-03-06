@@ -50,5 +50,14 @@ public class ProjectConfig {
     @Getter
     @Setter
     private Boolean commissioning_enforceBranch;
+    @Getter
+    @Setter
+    private Boolean production_mode;
+    @Getter
+    @Setter
+    private String production_branch;
+    @Getter
+    @Setter
+    private String production_tagPattern;
 
 }

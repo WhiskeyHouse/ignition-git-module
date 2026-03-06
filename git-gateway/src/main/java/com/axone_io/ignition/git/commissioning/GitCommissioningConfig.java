@@ -59,6 +59,15 @@ public class GitCommissioningConfig {
     @Getter
     @Setter
     private String initDefaultBranch;
+    @Getter
+    @Setter
+    private boolean productionMode = false;
+    @Getter
+    @Setter
+    private String productionBranch;
+    @Getter
+    @Setter
+    private String productionTagPattern;
 
     public void loadFromProjectConfig(ProjectConfig projectConfig) {
 
@@ -77,6 +86,9 @@ public class GitCommissioningConfig {
         this.enforceBranch = projectConfig.getCommissioning_enforceBranch() == null
                 || Boolean.TRUE.equals(projectConfig.getCommissioning_enforceBranch());
         this.initDefaultBranch = projectConfig.getInitDefaultBranch();
+        this.productionMode = Boolean.TRUE.equals(projectConfig.getProduction_mode());
+        this.productionBranch = projectConfig.getProduction_branch();
+        this.productionTagPattern = projectConfig.getProduction_tagPattern();
     }
 
     public void setSecretFromFilePath(Path filePath, boolean isSSHAuth) throws IOException {

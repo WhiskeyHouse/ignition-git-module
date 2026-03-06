@@ -1,11 +1,13 @@
 package com.axone_io.ignition.git;
 
 import com.axone_io.ignition.git.commissioning.utils.GitCommissioningUtils;
+import com.axone_io.ignition.git.dto.ProductionModeConfig;
 import com.axone_io.ignition.git.managers.GitImageManager;
 import com.axone_io.ignition.git.managers.GitManager;
 import com.axone_io.ignition.git.managers.GitProjectManager;
 import com.axone_io.ignition.git.managers.GitTagManager;
 import com.axone_io.ignition.git.managers.GitThemeManager;
+import com.axone_io.ignition.git.managers.ProductionModeManager;
 import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
@@ -57,7 +59,29 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                             boolean importTheme,
                             boolean importImages) throws Exception {
 
+        // Check production mode before pull
+        ProductionModeConfig prodConfig = getProductionModeConfigImpl(projectName);
+        if (prodConfig.isProductionMode()) {
+            logger.info("Production mode is active for project: " + projectName);
+
+            // Backup tags before pull if in production mode
+            if (importTags) {
+                logger.info("Backing up tags before pull in production mode");
+                backupCurrentTagsImpl(projectName);
+            }
+        }
+
         try (Git git = getGit(getProjectFolderPath(projectName))) {
+            // Validate production mode constraints
+            if (prodConfig.isProductionMode()) {
+                boolean isValid = ProductionModeManager.validatePull(git, prodConfig);
+                if (!isValid) {
+                    String errorMsg = "Production mode validation failed: " + prodConfig.getWarningMessage();
+                    logger.error(errorMsg);
+                    throw new RuntimeException(errorMsg);
+                }
+            }
+
             // Get the actual remote name (may not be "origin")
             String remoteName = getRemoteName(git);
 
@@ -94,6 +118,20 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     @Override
     public boolean pushImpl(String projectName, String userName) throws Exception {
         try (Git git = getGit(getProjectFolderPath(projectName))) {
+            // Check production mode before push
+            ProductionModeConfig prodConfig = getProductionModeConfigImpl(projectName);
+            if (prodConfig.isProductionMode()) {
+                logger.info("Production mode is active for project: " + projectName);
+
+                String currentBranch = git.getRepository().getBranch();
+                boolean isValid = ProductionModeManager.validatePush(git, prodConfig, currentBranch);
+                if (!isValid) {
+                    String errorMsg = "Production mode validation failed: " + prodConfig.getWarningMessage();
+                    logger.error(errorMsg);
+                    throw new RuntimeException(errorMsg);
+                }
+            }
+
             // Get the actual remote name (may not be "origin")
             String remoteName = getRemoteName(git);
 
@@ -915,5 +953,147 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         }
 
         return docs;
+    }
+
+    @Override
+    protected ProductionModeConfig getProductionModeConfigImpl(String projectName) throws Exception {
+        logger.debug("Getting production mode config for project: " + projectName);
+
+        GitProjectsConfigRecord config = GitManager.getGitProjectConfigRecord(projectName);
+        if (config == null) {
+            logger.warn("No git config found for project: " + projectName);
+            return new ProductionModeConfig(false, null, null);
+        }
+
+        return ProductionModeManager.buildConfig(config);
+    }
+
+    @Override
+    protected boolean validateProductionModePullImpl(String projectName, String userName) throws Exception {
+        logger.info("Validating production mode pull for project: " + projectName);
+
+        ProductionModeConfig config = getProductionModeConfigImpl(projectName);
+        if (!config.isProductionMode()) {
+            return true;
+        }
+
+        try (Git git = getGit(getProjectFolderPath(projectName))) {
+            boolean isValid = ProductionModeManager.validatePull(git, config);
+            if (!isValid) {
+                logger.warn("Production mode pull validation failed: " + config.getWarningMessage());
+            }
+            return isValid;
+        }
+    }
+
+    @Override
+    protected boolean validateProductionModePushImpl(String projectName, String userName, String targetBranch) throws Exception {
+        logger.info("Validating production mode push for project: " + projectName);
+
+        ProductionModeConfig config = getProductionModeConfigImpl(projectName);
+        if (!config.isProductionMode()) {
+            return true;
+        }
+
+        try (Git git = getGit(getProjectFolderPath(projectName))) {
+            boolean isValid = ProductionModeManager.validatePush(git, config, targetBranch);
+            if (!isValid) {
+                logger.warn("Production mode push validation failed: " + config.getWarningMessage());
+            }
+            return isValid;
+        }
+    }
+
+    @Override
+    protected List<String> listRepositoryTagsImpl(String projectName) throws Exception {
+        logger.debug("Listing repository tags for project: " + projectName);
+
+        try (Git git = getGit(getProjectFolderPath(projectName))) {
+            return ProductionModeManager.listTags(git);
+        }
+    }
+
+    @Override
+    protected boolean backupCurrentTagsImpl(String projectName) throws Exception {
+        logger.info("Backing up current tags for project: " + projectName);
+
+        try {
+            Path projectPath = getProjectFolderPath(projectName);
+            Path backupPath = projectPath.resolve(".git").resolve("tags_backup");
+
+            // Create backup directory if it doesn't exist
+            if (!Files.exists(backupPath)) {
+                Files.createDirectories(backupPath);
+            }
+
+            try (Git git = getGit(projectPath)) {
+                List<Ref> tags = git.tagList().call();
+
+                // Export each tag reference to backup
+                for (Ref tag : tags) {
+                    String tagName = tag.getName();
+                    if (tagName.startsWith("refs/tags/")) {
+                        tagName = tagName.substring("refs/tags/".length());
+                    }
+
+                    Path tagBackupFile = backupPath.resolve(tagName + ".ref");
+                    String objectId = tag.getObjectId().getName();
+
+                    Files.writeString(tagBackupFile, objectId);
+                    logger.debug("Backed up tag: " + tagName + " -> " + objectId);
+                }
+
+                logger.info("Successfully backed up " + tags.size() + " tags for project: " + projectName);
+                return true;
+            }
+        } catch (Exception e) {
+            logger.error("Error backing up tags for project: " + projectName, e);
+            throw new RuntimeException("Failed to backup tags", e);
+        }
+    }
+
+    @Override
+    protected boolean restoreTagsFromBackupImpl(String projectName) throws Exception {
+        logger.info("Restoring tags from backup for project: " + projectName);
+
+        try {
+            Path projectPath = getProjectFolderPath(projectName);
+            Path backupPath = projectPath.resolve(".git").resolve("tags_backup");
+
+            if (!Files.exists(backupPath)) {
+                logger.warn("No tag backup found for project: " + projectName);
+                return false;
+            }
+
+            try (Git git = getGit(projectPath)) {
+                try (DirectoryStream<Path> stream = Files.newDirectoryStream(backupPath, "*.ref")) {
+                    for (Path backupFile : stream) {
+                        String fileName = backupFile.getFileName().toString();
+                        String tagName = fileName.substring(0, fileName.length() - 4); // Remove .ref
+
+                        String objectId = Files.readString(backupFile).trim();
+
+                        // Restore tag reference
+                        try {
+                            git.tag()
+                               .setName(tagName)
+                               .setObjectId(git.getRepository().parseCommit(ObjectId.fromString(objectId)))
+                               .setForceUpdate(true)
+                               .call();
+
+                            logger.debug("Restored tag: " + tagName + " -> " + objectId);
+                        } catch (Exception e) {
+                            logger.warn("Failed to restore tag: " + tagName, e);
+                        }
+                    }
+                }
+
+                logger.info("Successfully restored tags from backup for project: " + projectName);
+                return true;
+            }
+        } catch (Exception e) {
+            logger.error("Error restoring tags from backup for project: " + projectName, e);
+            throw new RuntimeException("Failed to restore tags from backup", e);
+        }
     }
 }
