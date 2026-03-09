@@ -55,6 +55,9 @@ public class GitCommissioningConfig {
     private boolean importThemes = false;
     @Getter
     @Setter
+    private boolean enforceBranch = true;
+    @Getter
+    @Setter
     private String initDefaultBranch;
 
     public void loadFromProjectConfig(ProjectConfig projectConfig) {
@@ -71,6 +74,8 @@ public class GitCommissioningConfig {
         this.importImages = Boolean.TRUE.equals(projectConfig.getCommissioning_importImages());
         this.importTags = Boolean.TRUE.equals(projectConfig.getCommissioning_importTags());
         this.importThemes = Boolean.TRUE.equals(projectConfig.getCommissioning_importThemes());
+        this.enforceBranch = projectConfig.getCommissioning_enforceBranch() == null
+                || Boolean.TRUE.equals(projectConfig.getCommissioning_enforceBranch());
         this.initDefaultBranch = projectConfig.getInitDefaultBranch();
     }
 

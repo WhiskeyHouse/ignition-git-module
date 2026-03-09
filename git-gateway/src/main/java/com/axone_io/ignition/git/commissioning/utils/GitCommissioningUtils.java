@@ -181,24 +181,29 @@ public class GitCommissioningUtils {
             setAuthentication(fetch, projectName, config.getIgnitionUserName());
             fetch.call();
 
-            // 3. Switch branch if needed
-            if (!currentBranch.equals(configuredBranch)) {
-                logger.info("Switching project '" + projectName + "' from branch '" + currentBranch + "' to configured branch '" + configuredBranch + "'.");
-                boolean localBranchExists = git.branchList().call().stream()
-                        .anyMatch(ref -> ref.getName().equals("refs/heads/" + configuredBranch));
+            // 3. Switch branch if needed (and enforceBranch is enabled)
+            if (config.isEnforceBranch()) {
+                if (!currentBranch.equals(configuredBranch)) {
+                    logger.info("Switching project '" + projectName + "' from branch '" + currentBranch + "' to configured branch '" + configuredBranch + "'.");
+                    boolean localBranchExists = git.branchList().call().stream()
+                            .anyMatch(ref -> ref.getName().equals("refs/heads/" + configuredBranch));
 
-                CheckoutCommand checkout = git.checkout().setName(configuredBranch);
-                if (!localBranchExists) {
-                    checkout.setCreateBranch(true)
-                            .setUpstreamMode(CreateBranchCommand.SetupUpstreamMode.TRACK)
-                            .setStartPoint(remoteName + "/" + configuredBranch);
+                    CheckoutCommand checkout = git.checkout().setName(configuredBranch);
+                    if (!localBranchExists) {
+                        checkout.setCreateBranch(true)
+                                .setUpstreamMode(CreateBranchCommand.SetupUpstreamMode.TRACK)
+                                .setStartPoint(remoteName + "/" + configuredBranch);
+                    }
+                    checkout.call();
                 }
-                checkout.call();
+            } else {
+                logger.info("Skipping branch switch for project '" + projectName + "' because commissioning_enforceBranch is false. Staying on branch '" + currentBranch + "'.");
             }
 
             // 4. Pull latest
-            logger.info("Pulling latest changes for project '" + projectName + "' on branch '" + configuredBranch + "'...");
-            PullCommand pull = git.pull().setRemote(remoteName);
+            String activeBranch = git.getRepository().getBranch();
+            logger.info("Pulling latest changes for project '" + projectName + "' on branch '" + activeBranch + "'...");
+            PullCommand pull = git.pull().setRemote(remoteName).setRemoteBranchName(activeBranch);
             setAuthentication(pull, projectName, config.getIgnitionUserName());
             PullResult pullResult = pull.call();
             logger.info("Pull result for project '" + projectName + "': " + (pullResult.isSuccessful() ? "success" : "failed"));
@@ -347,7 +352,8 @@ public class GitCommissioningUtils {
                 yamlKey.equals("ignition_inheritable") || yamlKey.equals("ignition_parentName") ||
                 yamlKey.equals("user_name") || yamlKey.equals("user_email") ||
                 yamlKey.equals("user_password") || yamlKey.equals("commissioning_importThemes") ||
-                yamlKey.equals("commissioning_importTags") || yamlKey.equals("commissioning_importImages")) {
+                yamlKey.equals("commissioning_importTags") || yamlKey.equals("commissioning_importImages") ||
+                yamlKey.equals("commissioning_enforceBranch")) {
             return yamlKey; // Your field names already match the YAML keys
         }
 

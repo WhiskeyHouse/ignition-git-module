@@ -10,6 +10,7 @@
   commissioning_importThemes: true
   commissioning_importTags: true
   commissioning_importImages: true
+  commissioning_enforceBranch: false
   initDefaultBranch: main
 - repo_uri: https://github.com/WHK01/whk-distillery01-ignition-global.git
   repo_branch: development
@@ -23,3 +24,4 @@
   commissioning_importThemes: true
   commissioning_importTags: true
   commissioning_importImages: true
+  commissioning_enforceBranch: false

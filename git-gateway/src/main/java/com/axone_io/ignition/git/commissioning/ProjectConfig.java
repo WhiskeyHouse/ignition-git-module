@@ -47,5 +47,8 @@ public class ProjectConfig {
     @Getter
     @Setter
     private Boolean commissioning_importImages;
+    @Getter
+    @Setter
+    private Boolean commissioning_enforceBranch;
 
 }
