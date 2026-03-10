@@ -120,10 +120,11 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     @Override
     public boolean pushImpl(String projectName, String userName) throws Exception {
         try (Git git = getGit(getProjectFolderPath(projectName))) {
+            String currentBranch = git.getRepository().getBranch();
+
             // Check production mode before push
             ProductionModeConfig prodConfig = getProductionModeConfigImpl(projectName);
             if (prodConfig.isProductionMode()) {
-                String currentBranch = git.getRepository().getBranch();
                 logger.info("[Production Git Operation] PUSH initiated by user '" + userName + "' on branch '" + currentBranch + "', project: " + projectName);
 
                 boolean isValid = ProductionModeManager.validatePush(git, prodConfig, currentBranch);
@@ -143,8 +144,12 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
             setAuthentication(push, projectName, userName);
 
-            logger.info("Pushing to remote '" + remoteName + "' for project: " + projectName);
-            Iterable<PushResult> results = push.setPushAll().setPushTags().call();
+            // Push only the current branch (not all branches) to avoid bypassing production guards
+            RefSpec currentRefSpec = new RefSpec(
+                    Constants.R_HEADS + currentBranch + ":" + Constants.R_HEADS + currentBranch
+            );
+            logger.info("Pushing branch '" + currentBranch + "' to remote '" + remoteName + "' for project: " + projectName);
+            Iterable<PushResult> results = push.setRefSpecs(currentRefSpec).setPushTags().call();
             for (PushResult result : results) {
                 logger.trace(result.getMessages());
             }
@@ -1040,6 +1045,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                     }
 
                     Path tagBackupFile = backupPath.resolve(tagName + ".ref");
+                    Files.createDirectories(tagBackupFile.getParent());
                     String objectId = tag.getObjectId().getName();
 
                     Files.writeString(tagBackupFile, objectId);
@@ -1069,28 +1075,45 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             }
 
             try (Git git = getGit(projectPath)) {
-                try (DirectoryStream<Path> stream = Files.newDirectoryStream(backupPath, "*.ref")) {
-                    for (Path backupFile : stream) {
-                        String fileName = backupFile.getFileName().toString();
-                        String tagName = fileName.substring(0, fileName.length() - 4); // Remove .ref
+                int failed = 0;
+                // Walk recursively to find .ref files in subdirectories (slash-delimited tags)
+                try (java.util.stream.Stream<Path> stream = Files.walk(backupPath)
+                        .filter(p -> p.toString().endsWith(".ref") && Files.isRegularFile(p))) {
+                    for (Path backupFile : (Iterable<Path>) stream::iterator) {
+                        // Reconstruct tag name from relative path (e.g., release/v1.ref -> release/v1)
+                        String relativePath = backupPath.relativize(backupFile).toString();
+                        String tagName = relativePath.substring(0, relativePath.length() - 4); // Remove .ref
 
                         String objectId = Files.readString(backupFile).trim();
 
-                        // Restore tag reference
+                        // Restore tag reference directly without type validation
+                        // (annotated tags store a tag object ID, not a commit ID)
                         try {
-                            git.tag()
-                               .setName(tagName)
-                               .setObjectId(git.getRepository().parseCommit(ObjectId.fromString(objectId)))
-                               .setForceUpdate(true)
-                               .call();
+                            RefUpdate refUpdate = git.getRepository().updateRef(Constants.R_TAGS + tagName);
+                            refUpdate.setNewObjectId(ObjectId.fromString(objectId));
+                            refUpdate.setForceUpdate(true);
+                            RefUpdate.Result result = refUpdate.update();
 
-                            logger.debug("Restored tag: " + tagName + " -> " + objectId);
+                            if (result == RefUpdate.Result.NEW
+                                    || result == RefUpdate.Result.FORCED
+                                    || result == RefUpdate.Result.NO_CHANGE
+                                    || result == RefUpdate.Result.FAST_FORWARD) {
+                                logger.debug("Restored tag: " + tagName + " -> " + objectId);
+                            } else {
+                                failed++;
+                                logger.warn("Unexpected result while restoring tag '" + tagName + "': " + result);
+                            }
                         } catch (Exception e) {
+                            failed++;
                             logger.warn("Failed to restore tag: " + tagName, e);
                         }
                     }
                 }
 
+                if (failed > 0) {
+                    logger.warn("Restored tags with " + failed + " failures for project: " + projectName);
+                    return false;
+                }
                 logger.info("Successfully restored tags from backup for project: " + projectName);
                 return true;
             }

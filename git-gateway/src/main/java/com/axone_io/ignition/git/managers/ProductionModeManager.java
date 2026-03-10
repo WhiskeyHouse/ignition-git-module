@@ -127,7 +127,9 @@ public class ProductionModeManager {
 
             if (productionBranch != null && !productionBranch.isEmpty()) {
                 // Flag push to production branch as a warning (requires confirmation via popup)
-                if (targetBranch.equals(productionBranch)) {
+                if (targetBranch.equals(productionBranch)
+                        || "main".equals(targetBranch)
+                        || "master".equals(targetBranch)) {
                     String warning = String.format(
                         "You are pushing directly to the production branch '%s'. " +
                         "This should only be done for hotfixes that need to go live immediately.",
@@ -182,12 +184,16 @@ public class ProductionModeManager {
 
         try {
             // Convert wildcard pattern to regex if needed
-            String regexPattern = patternStr;
-            if (!patternStr.startsWith("^")) {
-                // Simple wildcard conversion: * -> .*, ? -> .
+            String regexPattern;
+            boolean looksLikeWildcard = patternStr.contains("*") || patternStr.contains("?");
+            if (looksLikeWildcard) {
+                // Wildcard conversion: * -> .*, ? -> .
                 regexPattern = patternStr.replace(".", "\\.")
-                                       .replace("*", ".*")
-                                       .replace("?", ".");
+                                         .replace("*", ".*")
+                                         .replace("?", ".");
+            } else {
+                // Treat as regex as-is
+                regexPattern = patternStr;
             }
 
             Pattern pattern = Pattern.compile(regexPattern);

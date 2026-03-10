@@ -200,8 +200,12 @@ public class GitActionManager {
                     }
                 } catch (Exception e) {
                     logger.error("Error checking production mode", e);
-                    // On error, default to showing pull popup
-                    showPullPopupInternal(projectName, userName);
+                    JOptionPane.showMessageDialog(
+                        context.getFrame(),
+                        "Unable to verify production mode for this project. Pull was blocked.\n\n" + e.getMessage(),
+                        "Production Mode Check Failed",
+                        JOptionPane.ERROR_MESSAGE
+                    );
                 }
             }
         };
@@ -255,7 +259,12 @@ public class GitActionManager {
                     }
                 } catch (Exception e) {
                     logger.error("Error checking production mode for push", e);
-                    executePush(projectName, userName);
+                    JOptionPane.showMessageDialog(
+                        context.getFrame(),
+                        "Unable to verify production mode for this project. Push was blocked.\n\n" + e.getMessage(),
+                        "Production Mode Check Failed",
+                        JOptionPane.ERROR_MESSAGE
+                    );
                 }
             }
         };
