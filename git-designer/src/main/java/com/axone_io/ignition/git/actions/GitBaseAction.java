@@ -15,6 +15,7 @@ import java.util.List;
 import static com.axone_io.ignition.git.DesignerHook.*;
 import static com.axone_io.ignition.git.managers.GitActionManager.showCommitPopup;
 import static com.axone_io.ignition.git.managers.GitActionManager.showPullPopup;
+import static com.axone_io.ignition.git.managers.GitActionManager.showPushWithProductionCheck;
 import static com.axone_io.ignition.git.managers.GitActionManager.showHistoryViewer;
 import static com.axone_io.ignition.git.managers.GitActionManager.showBranchPopup;
 import static com.axone_io.ignition.git.managers.GitActionManager.showConfirmPopup;
@@ -171,7 +172,8 @@ public class GitBaseAction extends BaseAction {
                     showPullPopup(projectName, userName);
                     break;
                 case PUSH:
-                    rpc.push(projectName, userName);
+                    confirmPopup = Boolean.FALSE;
+                    showPushWithProductionCheck(projectName, userName);
                     break;
                 case COMMIT:
                     confirmPopup = Boolean.FALSE;

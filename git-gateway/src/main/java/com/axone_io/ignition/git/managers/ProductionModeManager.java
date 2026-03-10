@@ -3,8 +3,10 @@ package com.axone_io.ignition.git.managers;
 import com.axone_io.ignition.git.dto.ProductionModeConfig;
 import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.Status;
 import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.lib.RepositoryState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,6 +46,16 @@ public class ProductionModeManager {
         }
 
         try {
+            // Check repository safety first
+            if (!isRepositorySafe(git.getRepository())) {
+                String warning = "Production mode: Repository is not in a safe state for pull. " +
+                        "Resolve uncommitted changes or incomplete merge/rebase before proceeding.";
+                logger.warn(warning);
+                config.setWarningMessage(warning);
+                config.setValid(false);
+                return false;
+            }
+
             String currentBranch = git.getRepository().getBranch();
             String productionBranch = config.getProductionBranch();
 
@@ -90,7 +102,9 @@ public class ProductionModeManager {
 
     /**
      * Validate if a push operation is safe in production mode.
-     * Prevents pushing to production branch unless explicitly allowed.
+     * Pushes to the production branch are allowed but flagged with a warning
+     * so the Designer can require explicit confirmation.
+     * Returns false only for hard blocks (unsafe repo state).
      */
     public static boolean validatePush(Git git, ProductionModeConfig config, String targetBranch) {
         if (!config.isProductionMode()) {
@@ -99,22 +113,29 @@ public class ProductionModeManager {
         }
 
         try {
+            // Check repository safety first — this is a hard block
+            if (!isRepositorySafe(git.getRepository())) {
+                String warning = "Production mode: Repository is not in a safe state for push. " +
+                        "Resolve uncommitted changes or incomplete merge/rebase before proceeding.";
+                logger.warn(warning);
+                config.setWarningMessage(warning);
+                config.setValid(false);
+                return false;
+            }
+
             String productionBranch = config.getProductionBranch();
 
             if (productionBranch != null && !productionBranch.isEmpty()) {
-                // Prevent direct push to production branch
-                if (targetBranch.equals(productionBranch) ||
-                    productionBranch.equals("main") ||
-                    productionBranch.equals("master")) {
-
+                // Flag push to production branch as a warning (requires confirmation via popup)
+                if (targetBranch.equals(productionBranch)) {
                     String warning = String.format(
-                        "Production mode: Direct push to '%s' is not allowed in production mode",
+                        "You are pushing directly to the production branch '%s'. " +
+                        "This should only be done for hotfixes that need to go live immediately.",
                         targetBranch
                     );
-                    logger.warn(warning);
+                    logger.warn("Production mode: Push to production branch '{}' — requires confirmation", targetBranch);
                     config.setWarningMessage(warning);
-                    config.setValid(false);
-                    return false;
+                    // Valid but with warning — Designer popup will handle confirmation
                 }
             }
 
@@ -212,12 +233,38 @@ public class ProductionModeManager {
 
     /**
      * Check if the current repository state is safe for production operations.
+     * A repository is considered unsafe if it has uncommitted changes or is in a
+     * special state (e.g., merging, rebasing, cherry-picking).
      */
     public static boolean isRepositorySafe(Repository repository) {
         try {
-            // Check for uncommitted changes
-            // This would need to be implemented based on JGit status check
             logger.debug("Checking repository safety for production operations");
+
+            // Check repository state (merging, rebasing, etc.)
+            RepositoryState state = repository.getRepositoryState();
+            if (state != RepositoryState.SAFE) {
+                logger.warn("Repository is in an unsafe state for production operations: {}", state);
+                return false;
+            }
+
+            // Check for uncommitted changes
+            try (Git git = new Git(repository)) {
+                Status status = git.status().call();
+                boolean hasUncommittedChanges = status.hasUncommittedChanges();
+                boolean hasUntrackedChanges = !status.getUntracked().isEmpty();
+
+                if (hasUncommittedChanges || hasUntrackedChanges) {
+                    logger.warn("Repository has uncommitted changes — unsafe for production operations. " +
+                            "Modified: {}, Added: {}, Removed: {}, Untracked: {}",
+                            status.getModified().size(),
+                            status.getAdded().size(),
+                            status.getRemoved().size(),
+                            status.getUntracked().size());
+                    return false;
+                }
+            }
+
+            logger.debug("Repository is safe for production operations");
             return true;
         } catch (Exception e) {
             logger.error("Error checking repository safety", e);

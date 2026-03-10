@@ -229,6 +229,65 @@ public class GitActionManager {
         });
     }
 
+    public static void showPushWithProductionCheck(String projectName, String userName) {
+        SwingWorker<ProductionModeConfig, Void> worker = new SwingWorker<ProductionModeConfig, Void>() {
+            @Override
+            protected ProductionModeConfig doInBackground() throws Exception {
+                return rpc.getProductionModeConfig(projectName);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    ProductionModeConfig prodConfig = get();
+
+                    if (prodConfig.isProductionMode()) {
+                        logger.info("Production mode is active for project: " + projectName + " — showing push confirmation");
+
+                        new ProductionModePopup(context.getFrame(), prodConfig, "Push to Remote") {
+                            @Override
+                            public void onProceed() {
+                                executePush(projectName, userName);
+                            }
+                        };
+                    } else {
+                        executePush(projectName, userName);
+                    }
+                } catch (Exception e) {
+                    logger.error("Error checking production mode for push", e);
+                    executePush(projectName, userName);
+                }
+            }
+        };
+        worker.execute();
+    }
+
+    private static void executePush(String projectName, String userName) {
+        SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                rpc.push(projectName, userName);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    get();
+                    String message = com.inductiveautomation.ignition.common.BundleUtil.get()
+                            .getStringLenient("DesignerHook.Actions.Push.ConfirmMessage");
+                    SwingUtilities.invokeLater(() -> showConfirmPopup(message, JOptionPane.INFORMATION_MESSAGE));
+                } catch (Exception e) {
+                    logger.error("Error during push", e);
+                    SwingUtilities.invokeLater(() -> {
+                        com.inductiveautomation.ignition.client.util.gui.ErrorUtil.showError(e);
+                    });
+                }
+            }
+        };
+        worker.execute();
+    }
+
     public static void showConfirmPopup(String message, int messageType) {
         JOptionPane.showConfirmDialog(context.getFrame(),
                 message, "Info", JOptionPane.DEFAULT_OPTION, messageType);

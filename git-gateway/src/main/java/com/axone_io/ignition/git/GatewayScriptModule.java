@@ -62,12 +62,13 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         // Check production mode before pull
         ProductionModeConfig prodConfig = getProductionModeConfigImpl(projectName);
         if (prodConfig.isProductionMode()) {
-            logger.info("Production mode is active for project: " + projectName);
+            logger.info("[Production Git Operation] PULL initiated by user '" + userName + "' on project: " + projectName);
 
             // Backup tags before pull if in production mode
             if (importTags) {
-                logger.info("Backing up tags before pull in production mode");
+                logger.info("[Production Git Operation] Backing up tags before pull for project: " + projectName);
                 backupCurrentTagsImpl(projectName);
+                logger.info("[Production Git Operation] Tag backup completed for project: " + projectName);
             }
         }
 
@@ -76,10 +77,11 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             if (prodConfig.isProductionMode()) {
                 boolean isValid = ProductionModeManager.validatePull(git, prodConfig);
                 if (!isValid) {
-                    String errorMsg = "Production mode validation failed: " + prodConfig.getWarningMessage();
+                    String errorMsg = "[Production Git Operation] Validation failed for PULL: " + prodConfig.getWarningMessage();
                     logger.error(errorMsg);
                     throw new RuntimeException(errorMsg);
                 }
+                logger.info("[Production Git Operation] Validation passed for PULL on branch '" + git.getRepository().getBranch() + "', project: " + projectName);
             }
 
             // Get the actual remote name (may not be "origin")
@@ -121,15 +123,16 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             // Check production mode before push
             ProductionModeConfig prodConfig = getProductionModeConfigImpl(projectName);
             if (prodConfig.isProductionMode()) {
-                logger.info("Production mode is active for project: " + projectName);
-
                 String currentBranch = git.getRepository().getBranch();
+                logger.info("[Production Git Operation] PUSH initiated by user '" + userName + "' on branch '" + currentBranch + "', project: " + projectName);
+
                 boolean isValid = ProductionModeManager.validatePush(git, prodConfig, currentBranch);
                 if (!isValid) {
-                    String errorMsg = "Production mode validation failed: " + prodConfig.getWarningMessage();
+                    String errorMsg = "[Production Git Operation] Validation failed for PUSH to branch '" + currentBranch + "': " + prodConfig.getWarningMessage();
                     logger.error(errorMsg);
                     throw new RuntimeException(errorMsg);
                 }
+                logger.info("[Production Git Operation] Validation passed for PUSH on branch '" + currentBranch + "', project: " + projectName);
             }
 
             // Get the actual remote name (may not be "origin")
@@ -970,7 +973,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected boolean validateProductionModePullImpl(String projectName, String userName) throws Exception {
-        logger.info("Validating production mode pull for project: " + projectName);
+        logger.info("[Production Git Operation] Validating PULL for user '" + userName + "', project: " + projectName);
 
         ProductionModeConfig config = getProductionModeConfigImpl(projectName);
         if (!config.isProductionMode()) {
@@ -980,7 +983,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         try (Git git = getGit(getProjectFolderPath(projectName))) {
             boolean isValid = ProductionModeManager.validatePull(git, config);
             if (!isValid) {
-                logger.warn("Production mode pull validation failed: " + config.getWarningMessage());
+                logger.warn("[Production Git Operation] PULL validation failed for user '" + userName + "': " + config.getWarningMessage());
             }
             return isValid;
         }
@@ -988,7 +991,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected boolean validateProductionModePushImpl(String projectName, String userName, String targetBranch) throws Exception {
-        logger.info("Validating production mode push for project: " + projectName);
+        logger.info("[Production Git Operation] Validating PUSH to branch '" + targetBranch + "' for user '" + userName + "', project: " + projectName);
 
         ProductionModeConfig config = getProductionModeConfigImpl(projectName);
         if (!config.isProductionMode()) {
@@ -998,7 +1001,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         try (Git git = getGit(getProjectFolderPath(projectName))) {
             boolean isValid = ProductionModeManager.validatePush(git, config, targetBranch);
             if (!isValid) {
-                logger.warn("Production mode push validation failed: " + config.getWarningMessage());
+                logger.warn("[Production Git Operation] PUSH validation failed for user '" + userName + "' to branch '" + targetBranch + "': " + config.getWarningMessage());
             }
             return isValid;
         }
@@ -1015,7 +1018,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected boolean backupCurrentTagsImpl(String projectName) throws Exception {
-        logger.info("Backing up current tags for project: " + projectName);
+        logger.info("[Production Git Operation] Backing up current tags for project: " + projectName);
 
         try {
             Path projectPath = getProjectFolderPath(projectName);
@@ -1040,14 +1043,14 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                     String objectId = tag.getObjectId().getName();
 
                     Files.writeString(tagBackupFile, objectId);
-                    logger.debug("Backed up tag: " + tagName + " -> " + objectId);
+                    logger.debug("[Production Git Operation] Backed up tag: " + tagName + " -> " + objectId);
                 }
 
-                logger.info("Successfully backed up " + tags.size() + " tags for project: " + projectName);
+                logger.info("[Production Git Operation] Successfully backed up " + tags.size() + " tags for project: " + projectName + " (backup location: " + backupPath + ")");
                 return true;
             }
         } catch (Exception e) {
-            logger.error("Error backing up tags for project: " + projectName, e);
+            logger.error("[Production Git Operation] Error backing up tags for project: " + projectName, e);
             throw new RuntimeException("Failed to backup tags", e);
         }
     }

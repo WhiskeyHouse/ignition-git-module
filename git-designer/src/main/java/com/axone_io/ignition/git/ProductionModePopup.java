@@ -98,7 +98,7 @@ public class ProductionModePopup extends JFrame {
             mainPanel.add(Box.createVerticalStrut(15));
         }
 
-        // Safety checklist
+        // Safety checklist with interactive checkboxes
         JPanel checklistPanel = new JPanel();
         checklistPanel.setLayout(new BoxLayout(checklistPanel, BoxLayout.Y_AXIS));
         checklistPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -108,17 +108,31 @@ public class ProductionModePopup extends JFrame {
         ));
 
         String[] safetyItems = {
-            "✓ I have reviewed the changes to be applied",
-            "✓ I have verified this is the correct environment",
-            "✓ I have a backup/rollback plan if needed",
-            "✓ I understand the impact of this operation"
+            "I have reviewed the changes to be applied",
+            "I have verified this is the correct environment",
+            "I have a backup/rollback plan if needed",
+            "I understand the impact of this operation"
         };
 
-        for (String item : safetyItems) {
-            JLabel itemLabel = new JLabel(item);
-            itemLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-            itemLabel.setFont(new Font("Dialog", Font.PLAIN, 11));
-            checklistPanel.add(itemLabel);
+        JButton proceedButton = new JButton("Proceed with Caution");
+        proceedButton.setEnabled(false); // Disabled until all checkboxes are checked
+
+        JCheckBox[] checkboxes = new JCheckBox[safetyItems.length];
+        for (int i = 0; i < safetyItems.length; i++) {
+            checkboxes[i] = new JCheckBox(safetyItems[i]);
+            checkboxes[i].setAlignmentX(Component.LEFT_ALIGNMENT);
+            checkboxes[i].setFont(new Font("Dialog", Font.PLAIN, 11));
+            checkboxes[i].addActionListener(e -> {
+                boolean allChecked = true;
+                for (JCheckBox cb : checkboxes) {
+                    if (!cb.isSelected()) {
+                        allChecked = false;
+                        break;
+                    }
+                }
+                proceedButton.setEnabled(allChecked);
+            });
+            checklistPanel.add(checkboxes[i]);
             checklistPanel.add(Box.createVerticalStrut(3));
         }
 
@@ -126,7 +140,7 @@ public class ProductionModePopup extends JFrame {
         mainPanel.add(Box.createVerticalStrut(15));
 
         // Confirmation message
-        JLabel confirmLabel = new JLabel("Are you sure you want to proceed?");
+        JLabel confirmLabel = new JLabel("Check all items above to enable proceed.");
         confirmLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
         confirmLabel.setFont(new Font("Dialog", Font.BOLD, 12));
         mainPanel.add(confirmLabel);
@@ -143,7 +157,6 @@ public class ProductionModePopup extends JFrame {
             dispose();
         });
 
-        JButton proceedButton = new JButton("Proceed with Caution");
         proceedButton.setBackground(new Color(255, 152, 0)); // Orange
         proceedButton.setForeground(Color.WHITE);
         proceedButton.setOpaque(true);
