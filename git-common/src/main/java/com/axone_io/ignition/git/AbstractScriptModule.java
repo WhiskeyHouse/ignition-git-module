@@ -1,5 +1,6 @@
 package com.axone_io.ignition.git;
 
+import com.axone_io.ignition.git.dto.ProductionModeConfig;
 import com.inductiveautomation.ignition.common.BundleUtil;
 
 import java.util.List;
@@ -159,6 +160,39 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
         return listDocsForResourceImpl(projectName, resourcePath);
     }
 
+    @Override
+    public ProductionModeConfig getProductionModeConfig(String projectName) throws Exception {
+        return getProductionModeConfigImpl(projectName);
+    }
+
+    @Override
+    public boolean validateProductionModePull(String projectName,
+                                               String userName) throws Exception {
+        return validateProductionModePullImpl(projectName, userName);
+    }
+
+    @Override
+    public boolean validateProductionModePush(String projectName,
+                                               String userName,
+                                               String targetBranch) throws Exception {
+        return validateProductionModePushImpl(projectName, userName, targetBranch);
+    }
+
+    @Override
+    public List<String> listRepositoryTags(String projectName) throws Exception {
+        return listRepositoryTagsImpl(projectName);
+    }
+
+    @Override
+    public boolean backupCurrentTags(String projectName) throws Exception {
+        return backupCurrentTagsImpl(projectName);
+    }
+
+    @Override
+    public boolean restoreTagsFromBackup(String projectName) throws Exception {
+        return restoreTagsFromBackupImpl(projectName);
+    }
+
     protected abstract boolean pullImpl(String projectName, String userName, boolean importTags, boolean importTheme,
                                         boolean importImages) throws Exception;
     protected abstract boolean pushImpl(String projectName, String userName) throws Exception;
@@ -183,5 +217,11 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
     protected abstract boolean importResourcesImpl(String projectName, boolean importTags, boolean importTheme, boolean importImages, String collisionPolicy) throws Exception;
     protected abstract List<String> getGitTrackedProjectNamesImpl();
     protected abstract List<String> listDocsForResourceImpl(String projectName, String resourcePath) throws Exception;
+    protected abstract ProductionModeConfig getProductionModeConfigImpl(String projectName) throws Exception;
+    protected abstract boolean validateProductionModePullImpl(String projectName, String userName) throws Exception;
+    protected abstract boolean validateProductionModePushImpl(String projectName, String userName, String targetBranch) throws Exception;
+    protected abstract List<String> listRepositoryTagsImpl(String projectName) throws Exception;
+    protected abstract boolean backupCurrentTagsImpl(String projectName) throws Exception;
+    protected abstract boolean restoreTagsFromBackupImpl(String projectName) throws Exception;
 
 }

@@ -22,6 +22,9 @@ public class GitProjectsConfigRecord extends PersistentRecord {
     public static final StringField ProjectName = new StringField(META, "ProjectName", SFieldFlags.SMANDATORY, SFieldFlags.SDESCRIPTIVE);
     public static final StringField URI =
             new StringField(META, "URI", SFieldFlags.SMANDATORY, SFieldFlags.SDESCRIPTIVE);
+    public static final BooleanField ProductionMode = new BooleanField(META, "ProductionMode");
+    public static final StringField ProductionBranch = new StringField(META, "ProductionBranch");
+    public static final StringField ProductionTagPattern = new StringField(META, "ProductionTagPattern");
 
     // Category removed in 8.3 - was only used for Wicket form grouping
     // static final Category ProjectConfiguration = new Category("GitProjectsConfigRecord.Category.ProjectConfiguration", 1000).include(ProjectName, URI);
@@ -49,6 +52,30 @@ public class GitProjectsConfigRecord extends PersistentRecord {
 
     public boolean isSSHAuthentication() {
         return !this.getString(URI).toLowerCase().startsWith("http");
+    }
+
+    public boolean getProductionMode() {
+        return this.getBoolean(ProductionMode);
+    }
+
+    public void setProductionMode(boolean productionMode) {
+        setBoolean(ProductionMode, productionMode);
+    }
+
+    public String getProductionBranch() {
+        return this.getString(ProductionBranch);
+    }
+
+    public void setProductionBranch(String productionBranch) {
+        setString(ProductionBranch, productionBranch);
+    }
+
+    public String getProductionTagPattern() {
+        return this.getString(ProductionTagPattern);
+    }
+
+    public void setProductionTagPattern(String productionTagPattern) {
+        setString(ProductionTagPattern, productionTagPattern);
     }
 
     // DISABLED FOR 8.3 UPGRADE - Web UI form metadata not needed without config pages

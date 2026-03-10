@@ -1,5 +1,6 @@
 package com.axone_io.ignition.git.managers;
 
+import com.axone_io.ignition.git.dto.ProductionModeConfig;
 import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
 import com.axone_io.ignition.git.BranchInfo;
 import com.axone_io.ignition.git.BranchPopup;
@@ -8,6 +9,7 @@ import com.axone_io.ignition.git.CommitHistoryViewer;
 import com.axone_io.ignition.git.CommitInfo;
 import com.axone_io.ignition.git.CommitPopup;
 import com.axone_io.ignition.git.DesignerHook;
+import com.axone_io.ignition.git.ProductionModePopup;
 import com.axone_io.ignition.git.PullPopup;
 import com.axone_io.ignition.git.UncommittedChange;
 import com.inductiveautomation.ignition.common.resourcecollection.ChangeOperation;
@@ -169,6 +171,48 @@ public class GitActionManager {
 
 
     public static void showPullPopup(String projectName, String userName) {
+        // Check production mode first
+        SwingWorker<ProductionModeConfig, Void> worker = new SwingWorker<ProductionModeConfig, Void>() {
+            @Override
+            protected ProductionModeConfig doInBackground() throws Exception {
+                return rpc.getProductionModeConfig(projectName);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    ProductionModeConfig prodConfig = get();
+
+                    // If production mode is active, show warning popup first
+                    if (prodConfig.isProductionMode()) {
+                        logger.info("Production mode is active for project: " + projectName);
+
+                        new ProductionModePopup(context.getFrame(), prodConfig, "Pull from Git") {
+                            @Override
+                            public void onProceed() {
+                                // User confirmed, show regular pull popup
+                                showPullPopupInternal(projectName, userName);
+                            }
+                        };
+                    } else {
+                        // Not in production mode, show regular pull popup
+                        showPullPopupInternal(projectName, userName);
+                    }
+                } catch (Exception e) {
+                    logger.error("Error checking production mode", e);
+                    JOptionPane.showMessageDialog(
+                        context.getFrame(),
+                        "Unable to verify production mode for this project. Pull was blocked.\n\n" + e.getMessage(),
+                        "Production Mode Check Failed",
+                        JOptionPane.ERROR_MESSAGE
+                    );
+                }
+            }
+        };
+        worker.execute();
+    }
+
+    private static void showPullPopupInternal(String projectName, String userName) {
         // Always recreate to ensure correct project context
         if (pullPopup != null) {
             pullPopup.dispose();
@@ -187,6 +231,70 @@ public class GitActionManager {
                 pullPopup = null;
             }
         });
+    }
+
+    public static void showPushWithProductionCheck(String projectName, String userName) {
+        SwingWorker<ProductionModeConfig, Void> worker = new SwingWorker<ProductionModeConfig, Void>() {
+            @Override
+            protected ProductionModeConfig doInBackground() throws Exception {
+                return rpc.getProductionModeConfig(projectName);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    ProductionModeConfig prodConfig = get();
+
+                    if (prodConfig.isProductionMode()) {
+                        logger.info("Production mode is active for project: " + projectName + " — showing push confirmation");
+
+                        new ProductionModePopup(context.getFrame(), prodConfig, "Push to Remote") {
+                            @Override
+                            public void onProceed() {
+                                executePush(projectName, userName);
+                            }
+                        };
+                    } else {
+                        executePush(projectName, userName);
+                    }
+                } catch (Exception e) {
+                    logger.error("Error checking production mode for push", e);
+                    JOptionPane.showMessageDialog(
+                        context.getFrame(),
+                        "Unable to verify production mode for this project. Push was blocked.\n\n" + e.getMessage(),
+                        "Production Mode Check Failed",
+                        JOptionPane.ERROR_MESSAGE
+                    );
+                }
+            }
+        };
+        worker.execute();
+    }
+
+    private static void executePush(String projectName, String userName) {
+        SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                rpc.push(projectName, userName);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    get();
+                    String message = com.inductiveautomation.ignition.common.BundleUtil.get()
+                            .getStringLenient("DesignerHook.Actions.Push.ConfirmMessage");
+                    SwingUtilities.invokeLater(() -> showConfirmPopup(message, JOptionPane.INFORMATION_MESSAGE));
+                } catch (Exception e) {
+                    logger.error("Error during push", e);
+                    SwingUtilities.invokeLater(() -> {
+                        com.inductiveautomation.ignition.client.util.gui.ErrorUtil.showError(e);
+                    });
+                }
+            }
+        };
+        worker.execute();
     }
 
     public static void showConfirmPopup(String message, int messageType) {
