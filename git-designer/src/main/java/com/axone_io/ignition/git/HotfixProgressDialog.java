@@ -8,7 +8,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.swing.*;
+import javax.swing.event.HyperlinkEvent;
 import java.awt.*;
+import java.awt.Desktop;
 
 /**
  * Progress dialog that polls the gateway for hotfix pipeline status.
@@ -21,7 +23,7 @@ public class HotfixProgressDialog extends JDialog {
 
     private final JLabel[] stepLabels;
     private final JLabel[] statusIcons;
-    private final JLabel summaryLabel;
+    private final JEditorPane summaryPane;
     private final JButton closeButton;
     private final Timer pollTimer;
     private final GitScriptInterface rpc;
@@ -66,10 +68,23 @@ public class HotfixProgressDialog extends JDialog {
 
         mainPanel.add(Box.createVerticalStrut(10));
 
-        summaryLabel = new JLabel(" ");
-        summaryLabel.setFont(new Font("Dialog", Font.BOLD, 12));
-        summaryLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        mainPanel.add(summaryLabel);
+        summaryPane = new JEditorPane();
+        summaryPane.setContentType("text/html");
+        summaryPane.setEditable(false);
+        summaryPane.setOpaque(false);
+        summaryPane.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
+        summaryPane.setFont(new Font("Dialog", Font.BOLD, 12));
+        summaryPane.setAlignmentX(Component.LEFT_ALIGNMENT);
+        summaryPane.addHyperlinkListener(e -> {
+            if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
+                try {
+                    Desktop.getDesktop().browse(e.getURL().toURI());
+                } catch (Exception ex) {
+                    logger.error("Failed to open PR URL", ex);
+                }
+            }
+        });
+        mainPanel.add(summaryPane);
         mainPanel.add(Box.createVerticalStrut(10));
 
         closeButton = new JButton("Close");
@@ -80,7 +95,7 @@ public class HotfixProgressDialog extends JDialog {
 
         setContentPane(mainPanel);
         pack();
-        setMinimumSize(new Dimension(400, getHeight()));
+        setMinimumSize(new Dimension(550, getHeight()));
         CommonUI.centerComponent(this, parent);
 
         // Poll every 500ms for progress updates
@@ -99,8 +114,11 @@ public class HotfixProgressDialog extends JDialog {
                 String message = result.getStepMessage(steps[i]);
                 statusIcons[i].setText(iconFor(status));
 
+                // Always keep the step display name visible
                 String label = steps[i].getDisplayName();
-                if (message != null && !message.isEmpty()) {
+                if (status == StepStatus.COMPLETED && message != null && !message.isEmpty()) {
+                    label += " \u2014 " + message;
+                } else if (status == StepStatus.FAILED && message != null && !message.isEmpty()) {
                     label += " \u2014 " + message;
                 }
                 stepLabels[i].setText(label);
@@ -112,15 +130,21 @@ public class HotfixProgressDialog extends JDialog {
                 setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
 
                 if (result.isPipelineSuccess()) {
-                    String prInfo = result.getPrUrl() != null
-                        ? "PR created: " + result.getPrUrl()
-                        : "PR was not created (check logs)";
-                    summaryLabel.setText("Hotfix complete. " + prInfo);
-                    summaryLabel.setForeground(new Color(56, 142, 60)); // green
+                    String prUrl = result.getPrUrl();
+                    if (prUrl != null) {
+                        summaryPane.setText("<html><b style='color:#388E3C;'>Hotfix complete.</b> " +
+                            "PR created: <a href='" + prUrl + "'>" + prUrl + "</a></html>");
+                    } else {
+                        summaryPane.setText("<html><b style='color:#388E3C;'>Hotfix complete.</b> " +
+                            "PR was not created (check logs).</html>");
+                    }
                 } else {
-                    summaryLabel.setText("Hotfix completed with warnings \u2014 check steps above.");
-                    summaryLabel.setForeground(new Color(244, 67, 54)); // red
+                    summaryPane.setText("<html><b style='color:#F44336;'>Hotfix completed with warnings</b> " +
+                        "\u2014 check steps above.</html>");
                 }
+
+                // Resize to fit content
+                pack();
             }
         } catch (Exception e) {
             logger.error("Error polling hotfix progress", e);
