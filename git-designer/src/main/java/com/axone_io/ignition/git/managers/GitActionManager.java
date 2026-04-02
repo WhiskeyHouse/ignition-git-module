@@ -1,5 +1,6 @@
 package com.axone_io.ignition.git.managers;
 
+import com.axone_io.ignition.git.dto.HotfixResult;
 import com.axone_io.ignition.git.dto.ProductionModeConfig;
 import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
 import com.axone_io.ignition.git.BranchInfo;
@@ -9,6 +10,8 @@ import com.axone_io.ignition.git.CommitHistoryViewer;
 import com.axone_io.ignition.git.CommitInfo;
 import com.axone_io.ignition.git.CommitPopup;
 import com.axone_io.ignition.git.DesignerHook;
+import com.axone_io.ignition.git.HotfixCommitDialog;
+import com.axone_io.ignition.git.HotfixProgressDialog;
 import com.axone_io.ignition.git.ProductionModePopup;
 import com.axone_io.ignition.git.PullPopup;
 import com.axone_io.ignition.git.UncommittedChange;
@@ -171,17 +174,32 @@ public class GitActionManager {
 
 
     public static void showPullPopup(String projectName, String userName) {
-        // Check production mode first
-        SwingWorker<ProductionModeConfig, Void> worker = new SwingWorker<ProductionModeConfig, Void>() {
+        // Check production mode and current branch first
+        SwingWorker<Object[], Void> worker = new SwingWorker<Object[], Void>() {
             @Override
-            protected ProductionModeConfig doInBackground() throws Exception {
-                return rpc.getProductionModeConfig(projectName);
+            protected Object[] doInBackground() throws Exception {
+                ProductionModeConfig config = rpc.getProductionModeConfig(projectName);
+                String currentBranch = rpc.getCurrentBranch(projectName);
+                return new Object[]{config, currentBranch};
             }
 
             @Override
             protected void done() {
                 try {
-                    ProductionModeConfig prodConfig = get();
+                    Object[] results = get();
+                    ProductionModeConfig prodConfig = (ProductionModeConfig) results[0];
+                    String currentBranch = (String) results[1];
+
+                    // Block pull on hotfix branches
+                    if (currentBranch != null && currentBranch.startsWith("hotfix/")) {
+                        JOptionPane.showMessageDialog(
+                            context.getFrame(),
+                            "Pull is disabled on hotfix branches.\nComplete your hotfix first, then pull on main.",
+                            "Hotfix Branch — Pull Blocked",
+                            JOptionPane.WARNING_MESSAGE
+                        );
+                        return;
+                    }
 
                     // If production mode is active, show warning popup first
                     if (prodConfig.isProductionMode()) {
@@ -231,6 +249,97 @@ public class GitActionManager {
                 pullPopup = null;
             }
         });
+    }
+
+    /**
+     * Check if current commit should trigger the hotfix workflow.
+     * Called from the toolbar Commit action and from the save-prompt.
+     */
+    public static void showCommitWithHotfixDetection(String projectName, String userName) {
+        SwingWorker<Object[], Void> worker = new SwingWorker<Object[], Void>() {
+            @Override
+            protected Object[] doInBackground() throws Exception {
+                ProductionModeConfig config = rpc.getProductionModeConfig(projectName);
+                String currentBranch = rpc.getCurrentBranch(projectName);
+                Object[][] changeData = getCommitPopupData(projectName, userName);
+                return new Object[]{config, currentBranch, changeData};
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    Object[] results = get();
+                    ProductionModeConfig config = (ProductionModeConfig) results[0];
+                    String currentBranch = (String) results[1];
+                    Object[][] changeData = (Object[][]) results[2];
+
+                    boolean isHotfix = config.isProductionMode()
+                        && config.getProductionBranch() != null
+                        && config.getProductionBranch().equals(currentBranch);
+
+                    if (isHotfix) {
+                        logger.info("Hotfix scenario detected: production mode on branch '{}'", currentBranch);
+                        showHotfixCommitDialog(projectName, userName, config, changeData);
+                    } else {
+                        showCommitPopup(projectName, userName);
+                    }
+                } catch (Exception e) {
+                    logger.error("Error checking hotfix scenario", e);
+                    showCommitPopup(projectName, userName);
+                }
+            }
+        };
+        worker.execute();
+    }
+
+    private static void showHotfixCommitDialog(String projectName, String userName,
+                                                ProductionModeConfig config, Object[][] changeData) {
+        String productionBranch = config.getProductionBranch();
+
+        HotfixCommitDialog dialog = new HotfixCommitDialog(
+            context.getFrame(), changeData, productionBranch
+        );
+        dialog.setVisible(true);
+
+        if (!dialog.isConfirmed()) {
+            return;
+        }
+
+        String description = dialog.getHotfixDescription();
+        String message = dialog.getCommitMessage();
+        List<String> changes = dialog.getSelectedChanges();
+
+        if (changes.isEmpty()) {
+            JOptionPane.showMessageDialog(context.getFrame(),
+                "No changes selected for hotfix.", "No Changes", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        executeHotfixWithProgress(projectName, userName, description, message, changes.toArray(new String[0]));
+    }
+
+    private static void executeHotfixWithProgress(String projectName, String userName,
+                                                   String description, String message, String[] changes) {
+        SwingWorker<HotfixResult, Void> executor = new SwingWorker<HotfixResult, Void>() {
+            @Override
+            protected HotfixResult doInBackground() throws Exception {
+                return rpc.executeHotfix(projectName, userName, description, message, changes);
+            }
+
+            @Override
+            protected void done() {
+                // Progress dialog handles completion via polling
+            }
+        };
+        executor.execute();
+
+        HotfixProgressDialog progressDialog = new HotfixProgressDialog(
+            context.getFrame(), rpc, projectName
+        );
+        progressDialog.setVisible(true);
+
+        // After progress dialog closes, invalidate cache
+        DesignerHook.invalidateProductionConfigCache();
     }
 
     public static void showPushWithProductionCheck(String projectName, String userName) {
@@ -328,6 +437,37 @@ public class GitActionManager {
     }
 
     public static void showBranchPopup(String projectName, String userName) {
+        // Block branch switching in production mode — use the hotfix workflow instead
+        ProductionModeConfig cachedConfig = DesignerHook.getCachedProductionConfig();
+        if (cachedConfig != null && cachedConfig.isProductionMode()) {
+            // Check if already on a hotfix branch (allow viewing for context)
+            try {
+                String currentBranch = rpc.getCurrentBranch(projectName);
+                if (currentBranch != null && currentBranch.startsWith("hotfix/")) {
+                    // On a hotfix branch — allow viewing but warn
+                    JOptionPane.showMessageDialog(
+                        context.getFrame(),
+                        "You are on hotfix branch '" + currentBranch + "'.\n" +
+                        "Complete your hotfix to return to the production branch.",
+                        "Hotfix Branch Active",
+                        JOptionPane.INFORMATION_MESSAGE
+                    );
+                    return;
+                }
+            } catch (Exception ignored) {}
+
+            JOptionPane.showMessageDialog(
+                context.getFrame(),
+                "Branch switching is disabled in production mode.\n" +
+                "Use the hotfix workflow to make changes.\n\n" +
+                "Save your changes and commit — the hotfix workflow\n" +
+                "will handle branching automatically.",
+                "Production Mode \u2014 Branch Switching Disabled",
+                JOptionPane.WARNING_MESSAGE
+            );
+            return;
+        }
+
         // Use SwingWorker to avoid blocking the EDT and prevent heap space issues
         SwingWorker<BranchData, Void> worker = new SwingWorker<BranchData, Void>() {
             @Override

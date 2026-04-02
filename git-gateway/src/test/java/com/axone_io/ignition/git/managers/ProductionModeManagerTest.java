@@ -138,6 +138,14 @@ public class ProductionModeManagerTest {
         assertTrue(config.hasWarnings());
     }
 
+    @Test
+    public void validatePush_toMainWhenProductionBranchIsRelease_noWarning() {
+        // "main" should not trigger a warning when production branch is "release"
+        ProductionModeConfig config = new ProductionModeConfig(true, "release", null);
+        assertTrue(ProductionModeManager.validatePush(git, config, "main"));
+        assertFalse(config.hasWarnings());
+    }
+
     // --- validatePull/Push with unsafe repo ---
 
     @Test
@@ -223,12 +231,12 @@ public class ProductionModeManagerTest {
     }
 
     @Test
-    public void isRepositorySafe_untrackedFiles_returnsFalse() throws Exception {
-        // Create an untracked file
+    public void isRepositorySafe_untrackedFiles_returnsTrue() throws Exception {
+        // Untracked files are ignored (Ignition may create temp files in the project dir)
         File newFile = new File(repository.getWorkTree(), "untracked.txt");
         Files.writeString(newFile.toPath(), "new file");
 
-        assertFalse(ProductionModeManager.isRepositorySafe(repository));
+        assertTrue(ProductionModeManager.isRepositorySafe(repository));
     }
 
     @Test
@@ -282,5 +290,42 @@ public class ProductionModeManagerTest {
         assertTrue(message.contains("PUSH"));
         assertFalse(message.contains("Production Branch:"));
         assertFalse(message.contains("Required Tag Pattern:"));
+    }
+
+    // --- Hotfix branch awareness tests ---
+
+    @Test
+    public void isHotfixBranch_hotfixPrefix_returnsTrue() {
+        assertTrue(ProductionModeManager.isHotfixBranch("hotfix/fix-pump-alarm"));
+    }
+
+    @Test
+    public void isHotfixBranch_mainBranch_returnsFalse() {
+        assertFalse(ProductionModeManager.isHotfixBranch("main"));
+    }
+
+    @Test
+    public void isHotfixBranch_featureBranch_returnsFalse() {
+        assertFalse(ProductionModeManager.isHotfixBranch("feature/new-widget"));
+    }
+
+    @Test
+    public void validatePull_onHotfixBranch_blocksPull() throws Exception {
+        git.branchCreate().setName("hotfix/fix-pump-alarm").call();
+        git.checkout().setName("hotfix/fix-pump-alarm").call();
+
+        ProductionModeConfig config = new ProductionModeConfig(true, "main", null);
+        assertFalse(ProductionModeManager.validatePull(git, config));
+        assertTrue(config.getWarningMessage().contains("disabled on hotfix branches"));
+    }
+
+    @Test
+    public void validatePush_onHotfixBranch_allowsWithoutWarning() throws Exception {
+        git.branchCreate().setName("hotfix/fix-pump-alarm").call();
+        git.checkout().setName("hotfix/fix-pump-alarm").call();
+
+        ProductionModeConfig config = new ProductionModeConfig(true, "main", null);
+        assertTrue(ProductionModeManager.validatePush(git, config, "hotfix/fix-pump-alarm"));
+        assertFalse(config.hasWarnings());
     }
 }

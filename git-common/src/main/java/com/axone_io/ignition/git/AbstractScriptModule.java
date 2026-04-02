@@ -1,5 +1,6 @@
 package com.axone_io.ignition.git;
 
+import com.axone_io.ignition.git.dto.HotfixResult;
 import com.axone_io.ignition.git.dto.ProductionModeConfig;
 import com.inductiveautomation.ignition.common.BundleUtil;
 
@@ -193,6 +194,23 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
         return restoreTagsFromBackupImpl(projectName);
     }
 
+    @Override
+    public HotfixResult executeHotfix(String projectName, String userName,
+                                      String hotfixDescription, String commitMessage,
+                                      String[] changes) throws Exception {
+        return executeHotfixImpl(projectName, userName, hotfixDescription, commitMessage, changes);
+    }
+
+    @Override
+    public HotfixResult getHotfixProgress(String projectName) throws Exception {
+        return getHotfixProgressImpl(projectName);
+    }
+
+    @Override
+    public HotfixResult getLastHotfixStatus(String projectName) throws Exception {
+        return getLastHotfixStatusImpl(projectName);
+    }
+
     protected abstract boolean pullImpl(String projectName, String userName, boolean importTags, boolean importTheme,
                                         boolean importImages) throws Exception;
     protected abstract boolean pushImpl(String projectName, String userName) throws Exception;
@@ -223,5 +241,10 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
     protected abstract List<String> listRepositoryTagsImpl(String projectName) throws Exception;
     protected abstract boolean backupCurrentTagsImpl(String projectName) throws Exception;
     protected abstract boolean restoreTagsFromBackupImpl(String projectName) throws Exception;
+    protected abstract HotfixResult executeHotfixImpl(String projectName, String userName,
+                                                      String hotfixDescription, String commitMessage,
+                                                      String[] changes) throws Exception;
+    protected abstract HotfixResult getHotfixProgressImpl(String projectName) throws Exception;
+    protected abstract HotfixResult getLastHotfixStatusImpl(String projectName) throws Exception;
 
 }

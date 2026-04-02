@@ -25,6 +25,11 @@ public class GitProjectsConfigRecord extends PersistentRecord {
     public static final BooleanField ProductionMode = new BooleanField(META, "ProductionMode");
     public static final StringField ProductionBranch = new StringField(META, "ProductionBranch");
     public static final StringField ProductionTagPattern = new StringField(META, "ProductionTagPattern");
+    public static final StringField LastHotfixStatus = new StringField(META, "LastHotfixStatus");
+    public static final LongField LastHotfixTimestamp = new LongField(META, "LastHotfixTimestamp");
+    public static final StringField LastHotfixUser = new StringField(META, "LastHotfixUser");
+    public static final StringField LastHotfixBranch = new StringField(META, "LastHotfixBranch");
+    public static final StringField LastHotfixPRUrl = new StringField(META, "LastHotfixPRUrl");
 
     // Category removed in 8.3 - was only used for Wicket form grouping
     // static final Category ProjectConfiguration = new Category("GitProjectsConfigRecord.Category.ProjectConfiguration", 1000).include(ProjectName, URI);
@@ -76,6 +81,46 @@ public class GitProjectsConfigRecord extends PersistentRecord {
 
     public void setProductionTagPattern(String productionTagPattern) {
         setString(ProductionTagPattern, productionTagPattern);
+    }
+
+    public String getLastHotfixStatus() {
+        return this.getString(LastHotfixStatus);
+    }
+
+    public void setLastHotfixStatus(String status) {
+        setString(LastHotfixStatus, status);
+    }
+
+    public long getLastHotfixTimestamp() {
+        return this.getLong(LastHotfixTimestamp);
+    }
+
+    public void setLastHotfixTimestamp(long timestamp) {
+        setLong(LastHotfixTimestamp, timestamp);
+    }
+
+    public String getLastHotfixUser() {
+        return this.getString(LastHotfixUser);
+    }
+
+    public void setLastHotfixUser(String user) {
+        setString(LastHotfixUser, user);
+    }
+
+    public String getLastHotfixBranch() {
+        return this.getString(LastHotfixBranch);
+    }
+
+    public void setLastHotfixBranch(String branch) {
+        setString(LastHotfixBranch, branch);
+    }
+
+    public String getLastHotfixPRUrl() {
+        return this.getString(LastHotfixPRUrl);
+    }
+
+    public void setLastHotfixPRUrl(String prUrl) {
+        setString(LastHotfixPRUrl, prUrl);
     }
 
     // DISABLED FOR 8.3 UPGRADE - Web UI form metadata not needed without config pages

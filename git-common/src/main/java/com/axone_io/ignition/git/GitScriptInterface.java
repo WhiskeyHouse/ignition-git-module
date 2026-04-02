@@ -1,5 +1,6 @@
 package com.axone_io.ignition.git;
 
+import com.axone_io.ignition.git.dto.HotfixResult;
 import com.axone_io.ignition.git.dto.ProductionModeConfig;
 import com.inductiveautomation.ignition.common.rpc.RpcInterface;
 import java.util.List;
@@ -51,5 +52,12 @@ public interface GitScriptInterface {
     List<String> listRepositoryTags(String projectName) throws Exception;
     boolean backupCurrentTags(String projectName) throws Exception;
     boolean restoreTagsFromBackup(String projectName) throws Exception;
+
+    // Hotfix operations
+    HotfixResult executeHotfix(String projectName, String userName,
+                               String hotfixDescription, String commitMessage,
+                               String[] changes) throws Exception;
+    HotfixResult getHotfixProgress(String projectName) throws Exception;
+    HotfixResult getLastHotfixStatus(String projectName) throws Exception;
 
 }

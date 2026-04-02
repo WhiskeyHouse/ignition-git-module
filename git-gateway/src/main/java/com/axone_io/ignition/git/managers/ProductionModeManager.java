@@ -33,6 +33,13 @@ public class ProductionModeManager {
     }
 
     /**
+     * Check if a branch name is a hotfix branch.
+     */
+    public static boolean isHotfixBranch(String branchName) {
+        return branchName != null && branchName.startsWith("hotfix/");
+    }
+
+    /**
      * Validate if a pull operation is safe in production mode.
      * Checks:
      * - If production mode is enabled
@@ -46,6 +53,17 @@ public class ProductionModeManager {
         }
 
         try {
+            String currentBranch = git.getRepository().getBranch();
+
+            // Block pull on hotfix branches — hotfix is a sealed environment
+            if (isHotfixBranch(currentBranch)) {
+                String warning = "Pull is disabled on hotfix branches. Complete your hotfix first, then pull on main.";
+                logger.warn(warning);
+                config.setWarningMessage(warning);
+                config.setValid(false);
+                return false;
+            }
+
             // Check repository safety first
             if (!isRepositorySafe(git.getRepository())) {
                 String warning = "Production mode: Repository is not in a safe state for pull. " +
@@ -56,7 +74,6 @@ public class ProductionModeManager {
                 return false;
             }
 
-            String currentBranch = git.getRepository().getBranch();
             String productionBranch = config.getProductionBranch();
 
             // Check if we're on the production branch
@@ -113,6 +130,12 @@ public class ProductionModeManager {
         }
 
         try {
+            // Hotfix branches are expected to be pushed — no warning needed
+            if (isHotfixBranch(targetBranch)) {
+                logger.info("Production mode: allowing push on hotfix branch '{}'", targetBranch);
+                return true;
+            }
+
             // Check repository safety first — this is a hard block
             if (!isRepositorySafe(git.getRepository())) {
                 String warning = "Production mode: Repository is not in a safe state for push. " +
@@ -127,9 +150,7 @@ public class ProductionModeManager {
 
             if (productionBranch != null && !productionBranch.isEmpty()) {
                 // Flag push to production branch as a warning (requires confirmation via popup)
-                if (targetBranch.equals(productionBranch)
-                        || "main".equals(targetBranch)
-                        || "master".equals(targetBranch)) {
+                if (targetBranch.equals(productionBranch)) {
                     String warning = String.format(
                         "You are pushing directly to the production branch '%s'. " +
                         "This should only be done for hotfixes that need to go live immediately.",
@@ -187,10 +208,19 @@ public class ProductionModeManager {
             String regexPattern;
             boolean looksLikeWildcard = patternStr.contains("*") || patternStr.contains("?");
             if (looksLikeWildcard) {
-                // Wildcard conversion: * -> .*, ? -> .
-                regexPattern = patternStr.replace(".", "\\.")
-                                         .replace("*", ".*")
-                                         .replace("?", ".");
+                // Split on wildcards, quote literal segments, then rejoin with regex equivalents
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < patternStr.length(); i++) {
+                    char c = patternStr.charAt(i);
+                    if (c == '*') {
+                        sb.append(".*");
+                    } else if (c == '?') {
+                        sb.append(".");
+                    } else {
+                        sb.append(Pattern.quote(String.valueOf(c)));
+                    }
+                }
+                regexPattern = sb.toString();
             } else {
                 // Treat as regex as-is
                 regexPattern = patternStr;
@@ -253,19 +283,17 @@ public class ProductionModeManager {
                 return false;
             }
 
-            // Check for uncommitted changes
+            // Check for uncommitted changes (untracked files are ignored as Ignition
+            // may create temporary files in the project directory)
             try (Git git = new Git(repository)) {
                 Status status = git.status().call();
-                boolean hasUncommittedChanges = status.hasUncommittedChanges();
-                boolean hasUntrackedChanges = !status.getUntracked().isEmpty();
 
-                if (hasUncommittedChanges || hasUntrackedChanges) {
+                if (status.hasUncommittedChanges()) {
                     logger.warn("Repository has uncommitted changes — unsafe for production operations. " +
-                            "Modified: {}, Added: {}, Removed: {}, Untracked: {}",
+                            "Modified: {}, Added: {}, Removed: {}",
                             status.getModified().size(),
                             status.getAdded().size(),
-                            status.getRemoved().size(),
-                            status.getUntracked().size());
+                            status.getRemoved().size());
                     return false;
                 }
             }

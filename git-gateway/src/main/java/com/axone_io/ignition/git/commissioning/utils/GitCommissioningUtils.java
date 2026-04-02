@@ -85,6 +85,12 @@ public class GitCommissioningUtils {
                             logger.info("Created GitProjectsConfigRecord for '" + config.getIgnitionProjectName() + "'.");
                         }
 
+                        // Always sync production mode settings from YAML (applies to both new and existing records)
+                        projectsConfigRecord.setProductionMode(config.isProductionMode());
+                        projectsConfigRecord.setProductionBranch(config.getProductionBranch());
+                        projectsConfigRecord.setProductionTagPattern(config.getProductionTagPattern());
+                        persistenceInterface.save(projectsConfigRecord);
+
                         // Ensure user record exists for this project
                         SQuery<GitReposUsersRecord> userQuery = new SQuery<>(GitReposUsersRecord.META).eq(GitReposUsersRecord.ProjectId, projectsConfigRecord.getId());
                         if (persistenceInterface.queryOne(userQuery) == null) {
@@ -353,7 +359,9 @@ public class GitCommissioningUtils {
                 yamlKey.equals("user_name") || yamlKey.equals("user_email") ||
                 yamlKey.equals("user_password") || yamlKey.equals("commissioning_importThemes") ||
                 yamlKey.equals("commissioning_importTags") || yamlKey.equals("commissioning_importImages") ||
-                yamlKey.equals("commissioning_enforceBranch")) {
+                yamlKey.equals("commissioning_enforceBranch") ||
+                yamlKey.equals("production_mode") || yamlKey.equals("production_branch") ||
+                yamlKey.equals("production_tagPattern")) {
             return yamlKey; // Your field names already match the YAML keys
         }
 

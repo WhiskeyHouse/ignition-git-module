@@ -1,5 +1,6 @@
 package com.axone_io.ignition.git;
 
+import com.axone_io.ignition.git.dto.HotfixResult;
 import com.axone_io.ignition.git.dto.ProductionModeConfig;
 
 import java.util.List;
@@ -161,5 +162,22 @@ public class ClientScriptModule extends AbstractScriptModule {
     @Override
     protected boolean restoreTagsFromBackupImpl(String projectName) throws Exception {
         return rpc.restoreTagsFromBackup(projectName);
+    }
+
+    @Override
+    protected HotfixResult executeHotfixImpl(String projectName, String userName,
+                                             String hotfixDescription, String commitMessage,
+                                             String[] changes) throws Exception {
+        return rpc.executeHotfix(projectName, userName, hotfixDescription, commitMessage, changes);
+    }
+
+    @Override
+    protected HotfixResult getHotfixProgressImpl(String projectName) throws Exception {
+        return rpc.getHotfixProgress(projectName);
+    }
+
+    @Override
+    protected HotfixResult getLastHotfixStatusImpl(String projectName) throws Exception {
+        return rpc.getLastHotfixStatus(projectName);
     }
 }

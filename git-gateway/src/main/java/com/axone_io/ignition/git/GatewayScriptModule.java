@@ -1,14 +1,17 @@
 package com.axone_io.ignition.git;
 
 import com.axone_io.ignition.git.commissioning.utils.GitCommissioningUtils;
+import com.axone_io.ignition.git.dto.HotfixResult;
 import com.axone_io.ignition.git.dto.ProductionModeConfig;
 import com.axone_io.ignition.git.managers.GitImageManager;
 import com.axone_io.ignition.git.managers.GitManager;
 import com.axone_io.ignition.git.managers.GitProjectManager;
 import com.axone_io.ignition.git.managers.GitTagManager;
 import com.axone_io.ignition.git.managers.GitThemeManager;
+import com.axone_io.ignition.git.managers.HotfixManager;
 import com.axone_io.ignition.git.managers.ProductionModeManager;
 import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
+import com.axone_io.ignition.git.records.GitReposUsersRecord;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 import org.eclipse.jgit.api.*;
@@ -63,17 +66,10 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         ProductionModeConfig prodConfig = getProductionModeConfigImpl(projectName);
         if (prodConfig.isProductionMode()) {
             logger.info("[Production Git Operation] PULL initiated by user '" + userName + "' on project: " + projectName);
-
-            // Backup tags before pull if in production mode
-            if (importTags) {
-                logger.info("[Production Git Operation] Backing up tags before pull for project: " + projectName);
-                backupCurrentTagsImpl(projectName);
-                logger.info("[Production Git Operation] Tag backup completed for project: " + projectName);
-            }
         }
 
         try (Git git = getGit(getProjectFolderPath(projectName))) {
-            // Validate production mode constraints
+            // Validate production mode constraints before doing anything else
             if (prodConfig.isProductionMode()) {
                 boolean isValid = ProductionModeManager.validatePull(git, prodConfig);
                 if (!isValid) {
@@ -82,6 +78,13 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                     throw new RuntimeException(errorMsg);
                 }
                 logger.info("[Production Git Operation] Validation passed for PULL on branch '" + git.getRepository().getBranch() + "', project: " + projectName);
+
+                // Backup tags after validation passes but before the actual pull
+                if (importTags) {
+                    logger.info("[Production Git Operation] Backing up tags before pull for project: " + projectName);
+                    backupCurrentTagsImpl(projectName);
+                    logger.info("[Production Git Operation] Tag backup completed for project: " + projectName);
+                }
             }
 
             // Get the actual remote name (may not be "origin")
@@ -1029,10 +1032,14 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             Path projectPath = getProjectFolderPath(projectName);
             Path backupPath = projectPath.resolve(".git").resolve("tags_backup");
 
-            // Create backup directory if it doesn't exist
-            if (!Files.exists(backupPath)) {
-                Files.createDirectories(backupPath);
+            // Clear previous backup and recreate directory
+            if (Files.exists(backupPath)) {
+                try (java.util.stream.Stream<Path> walk = Files.walk(backupPath)) {
+                    walk.sorted(java.util.Comparator.reverseOrder())
+                        .forEach(p -> { try { Files.delete(p); } catch (Exception ignored) {} });
+                }
             }
+            Files.createDirectories(backupPath);
 
             try (Git git = getGit(projectPath)) {
                 List<Ref> tags = git.tagList().call();
@@ -1121,5 +1128,71 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             logger.error("Error restoring tags from backup for project: " + projectName, e);
             throw new RuntimeException("Failed to restore tags from backup", e);
         }
+    }
+
+    // --- Hotfix operations ---
+
+    @Override
+    protected HotfixResult executeHotfixImpl(String projectName, String userName,
+                                             String hotfixDescription, String commitMessage,
+                                             String[] changes) throws Exception {
+        logger.info("[Production Hotfix] executeHotfix called for project '" + projectName + "' by user '" + userName + "'");
+
+        GitProjectsConfigRecord configRecord = GitManager.getGitProjectConfigRecord(projectName);
+        GitReposUsersRecord userRecord = GitManager.getGitReposUserRecord(configRecord, userName);
+        ProductionModeConfig prodConfig = ProductionModeManager.buildConfig(configRecord);
+
+        if (!prodConfig.isProductionMode()) {
+            throw new RuntimeException("Hotfix workflow requires production mode to be enabled");
+        }
+
+        String repoUri = configRecord.getURI();
+        String token = configRecord.isSSHAuthentication() ? null : userRecord.getPassword();
+        String gatewayName;
+        try {
+            gatewayName = java.net.InetAddress.getLocalHost().getHostName();
+        } catch (Exception e) {
+            gatewayName = "ignition-gateway";
+        }
+        String productionBranch = prodConfig.getProductionBranch();
+        String userEmail = userRecord.getEmail();
+
+        if (productionBranch == null || productionBranch.isEmpty()) {
+            productionBranch = "main";
+        }
+
+        try (Git git = getGit(getProjectFolderPath(projectName))) {
+            return HotfixManager.execute(
+                git, projectName, userName, hotfixDescription, commitMessage, changes,
+                userEmail, repoUri, token, gatewayName, productionBranch,
+                configRecord, context.getPersistenceInterface()
+            );
+        }
+    }
+
+    @Override
+    protected HotfixResult getHotfixProgressImpl(String projectName) throws Exception {
+        HotfixResult active = HotfixManager.getActiveHotfix(projectName);
+        if (active != null) {
+            return active;
+        }
+        return getLastHotfixStatusImpl(projectName);
+    }
+
+    @Override
+    protected HotfixResult getLastHotfixStatusImpl(String projectName) throws Exception {
+        GitProjectsConfigRecord config = GitManager.getGitProjectConfigRecord(projectName);
+        HotfixResult result = new HotfixResult();
+        result.setPipelineComplete(true);
+
+        String status = config.getLastHotfixStatus();
+        if (status == null || status.isEmpty()) {
+            return result;
+        }
+
+        result.setPipelineSuccess("COMPLETED".equals(status));
+        result.setHotfixBranch(config.getLastHotfixBranch());
+        result.setPrUrl(config.getLastHotfixPRUrl());
+        return result;
     }
 }
