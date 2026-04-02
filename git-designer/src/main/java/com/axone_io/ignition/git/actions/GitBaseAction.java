@@ -14,6 +14,7 @@ import java.util.List;
 
 import static com.axone_io.ignition.git.DesignerHook.*;
 import static com.axone_io.ignition.git.managers.GitActionManager.showCommitPopup;
+import static com.axone_io.ignition.git.managers.GitActionManager.showCommitWithHotfixDetection;
 import static com.axone_io.ignition.git.managers.GitActionManager.showPullPopup;
 import static com.axone_io.ignition.git.managers.GitActionManager.showPushWithProductionCheck;
 import static com.axone_io.ignition.git.managers.GitActionManager.showHistoryViewer;
@@ -113,6 +114,7 @@ public class GitBaseAction extends BaseAction {
 
         try {
             rpc.pull(projectName, userName, importTags, importTheme, importImages);
+            com.axone_io.ignition.git.DesignerHook.invalidateProductionConfigCache();
             SwingUtilities.invokeLater(new Thread(() -> showConfirmPopup(message, messageType)));
         } catch (Exception ex) {
             ErrorUtil.showError(ex);
@@ -177,7 +179,7 @@ public class GitBaseAction extends BaseAction {
                     break;
                 case COMMIT:
                     confirmPopup = Boolean.FALSE;
-                    showCommitPopup(projectName, userName);
+                    showCommitWithHotfixDetection(projectName, userName);
                     break;
                 case EXPORT:
                     if (!confirmExportMultiProject(projectName)) {
