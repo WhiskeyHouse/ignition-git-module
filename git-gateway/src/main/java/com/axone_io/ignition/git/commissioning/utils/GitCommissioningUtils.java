@@ -77,6 +77,9 @@ public class GitCommissioningUtils {
                             projectsConfigRecord = persistenceInterface.createNew(GitProjectsConfigRecord.META);
                             projectsConfigRecord.setProjectName(config.getIgnitionProjectName());
                             projectsConfigRecord.setURI(config.getRepoURI());
+                            projectsConfigRecord.setProductionMode(config.isProductionMode());
+                            projectsConfigRecord.setProductionBranch(config.getProductionBranch());
+                            projectsConfigRecord.setProductionTagPattern(config.getProductionTagPattern());
 
                             if (config.getSshKey() == null && config.getUserPassword() == null) {
                                 throw new Exception("Git User Password or SSHKey not configured.");

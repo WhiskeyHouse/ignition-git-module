@@ -14,13 +14,14 @@ import java.awt.*;
  *
  * <p>Note: Uses standard Swing layouts only (no IntelliJ forms library).</p>
  */
-public class ProductionModePopup extends JFrame {
+public class ProductionModePopup extends JDialog {
     private final Logger logger = LoggerFactory.getLogger(getClass());
 
     private boolean confirmed = false;
 
     public ProductionModePopup(Component parent, ProductionModeConfig config, String operation) {
-        setTitle("⚠️ Production Mode Warning");
+        super(parent instanceof Window ? (Window) parent : SwingUtilities.getWindowAncestor(parent),
+              "⚠️ Production Mode Warning", ModalityType.APPLICATION_MODAL);
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         setResizable(false);
 

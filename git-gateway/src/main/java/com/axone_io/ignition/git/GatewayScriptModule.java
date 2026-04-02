@@ -63,17 +63,10 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         ProductionModeConfig prodConfig = getProductionModeConfigImpl(projectName);
         if (prodConfig.isProductionMode()) {
             logger.info("[Production Git Operation] PULL initiated by user '" + userName + "' on project: " + projectName);
-
-            // Backup tags before pull if in production mode
-            if (importTags) {
-                logger.info("[Production Git Operation] Backing up tags before pull for project: " + projectName);
-                backupCurrentTagsImpl(projectName);
-                logger.info("[Production Git Operation] Tag backup completed for project: " + projectName);
-            }
         }
 
         try (Git git = getGit(getProjectFolderPath(projectName))) {
-            // Validate production mode constraints
+            // Validate production mode constraints before doing anything else
             if (prodConfig.isProductionMode()) {
                 boolean isValid = ProductionModeManager.validatePull(git, prodConfig);
                 if (!isValid) {
@@ -82,6 +75,13 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                     throw new RuntimeException(errorMsg);
                 }
                 logger.info("[Production Git Operation] Validation passed for PULL on branch '" + git.getRepository().getBranch() + "', project: " + projectName);
+
+                // Backup tags after validation passes but before the actual pull
+                if (importTags) {
+                    logger.info("[Production Git Operation] Backing up tags before pull for project: " + projectName);
+                    backupCurrentTagsImpl(projectName);
+                    logger.info("[Production Git Operation] Tag backup completed for project: " + projectName);
+                }
             }
 
             // Get the actual remote name (may not be "origin")
@@ -1029,10 +1029,14 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             Path projectPath = getProjectFolderPath(projectName);
             Path backupPath = projectPath.resolve(".git").resolve("tags_backup");
 
-            // Create backup directory if it doesn't exist
-            if (!Files.exists(backupPath)) {
-                Files.createDirectories(backupPath);
+            // Clear previous backup and recreate directory
+            if (Files.exists(backupPath)) {
+                try (java.util.stream.Stream<Path> walk = Files.walk(backupPath)) {
+                    walk.sorted(java.util.Comparator.reverseOrder())
+                        .forEach(p -> { try { Files.delete(p); } catch (Exception ignored) {} });
+                }
             }
+            Files.createDirectories(backupPath);
 
             try (Git git = getGit(projectPath)) {
                 List<Ref> tags = git.tagList().call();
