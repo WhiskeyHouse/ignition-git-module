@@ -77,9 +77,6 @@ public class GitCommissioningUtils {
                             projectsConfigRecord = persistenceInterface.createNew(GitProjectsConfigRecord.META);
                             projectsConfigRecord.setProjectName(config.getIgnitionProjectName());
                             projectsConfigRecord.setURI(config.getRepoURI());
-                            projectsConfigRecord.setProductionMode(config.isProductionMode());
-                            projectsConfigRecord.setProductionBranch(config.getProductionBranch());
-                            projectsConfigRecord.setProductionTagPattern(config.getProductionTagPattern());
 
                             if (config.getSshKey() == null && config.getUserPassword() == null) {
                                 throw new Exception("Git User Password or SSHKey not configured.");
@@ -87,6 +84,12 @@ public class GitCommissioningUtils {
                             persistenceInterface.save(projectsConfigRecord);
                             logger.info("Created GitProjectsConfigRecord for '" + config.getIgnitionProjectName() + "'.");
                         }
+
+                        // Always sync production mode settings from YAML (applies to both new and existing records)
+                        projectsConfigRecord.setProductionMode(config.isProductionMode());
+                        projectsConfigRecord.setProductionBranch(config.getProductionBranch());
+                        projectsConfigRecord.setProductionTagPattern(config.getProductionTagPattern());
+                        persistenceInterface.save(projectsConfigRecord);
 
                         // Ensure user record exists for this project
                         SQuery<GitReposUsersRecord> userQuery = new SQuery<>(GitReposUsersRecord.META).eq(GitReposUsersRecord.ProjectId, projectsConfigRecord.getId());
