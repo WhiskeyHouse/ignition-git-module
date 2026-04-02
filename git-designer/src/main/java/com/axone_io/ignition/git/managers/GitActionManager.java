@@ -437,6 +437,37 @@ public class GitActionManager {
     }
 
     public static void showBranchPopup(String projectName, String userName) {
+        // Block branch switching in production mode — use the hotfix workflow instead
+        ProductionModeConfig cachedConfig = DesignerHook.getCachedProductionConfig();
+        if (cachedConfig != null && cachedConfig.isProductionMode()) {
+            // Check if already on a hotfix branch (allow viewing for context)
+            try {
+                String currentBranch = rpc.getCurrentBranch(projectName);
+                if (currentBranch != null && currentBranch.startsWith("hotfix/")) {
+                    // On a hotfix branch — allow viewing but warn
+                    JOptionPane.showMessageDialog(
+                        context.getFrame(),
+                        "You are on hotfix branch '" + currentBranch + "'.\n" +
+                        "Complete your hotfix to return to the production branch.",
+                        "Hotfix Branch Active",
+                        JOptionPane.INFORMATION_MESSAGE
+                    );
+                    return;
+                }
+            } catch (Exception ignored) {}
+
+            JOptionPane.showMessageDialog(
+                context.getFrame(),
+                "Branch switching is disabled in production mode.\n" +
+                "Use the hotfix workflow to make changes.\n\n" +
+                "Save your changes and commit — the hotfix workflow\n" +
+                "will handle branching automatically.",
+                "Production Mode \u2014 Branch Switching Disabled",
+                JOptionPane.WARNING_MESSAGE
+            );
+            return;
+        }
+
         // Use SwingWorker to avoid blocking the EDT and prevent heap space issues
         SwingWorker<BranchData, Void> worker = new SwingWorker<BranchData, Void>() {
             @Override
