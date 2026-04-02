@@ -30,6 +30,11 @@ public class HotfixManager {
         return activeHotfixes.get(projectName);
     }
 
+    /** Called by Designer after the progress dialog has read the final state. */
+    public static void clearActiveHotfix(String projectName) {
+        activeHotfixes.remove(projectName);
+    }
+
     /**
      * Execute the full hotfix pipeline. Called from GatewayScriptModule on a background thread.
      */
@@ -177,8 +182,9 @@ public class HotfixManager {
             // Persist status to DB
             persistHotfixStatus(configRecord, persistence, result, userName);
 
-        } finally {
-            activeHotfixes.remove(projectName);
+        } catch (Exception e) {
+            logger.error("[Production Hotfix] Unexpected error in pipeline", e);
+            failPipeline(result, "Unexpected error: " + e.getMessage());
         }
 
         return result;
