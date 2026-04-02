@@ -2,6 +2,48 @@
 
 Production mode is a safety layer that protects production Ignition gateways from accidental or uncontrolled Git operations. When enabled, it enforces validation checks, requires explicit confirmation for risky operations, and provides an automated hotfix workflow for emergency changes.
 
+## Architecture Overview
+
+```mermaid
+graph TB
+    subgraph "YAML Configuration"
+        YAML[git.yaml<br/>production_mode: true<br/>production_branch: main<br/>production_tagPattern: v*]
+    end
+
+    subgraph "Gateway (git-gateway)"
+        DB[(GitProjectsConfigRecord<br/>Internal DB)]
+        PMM[ProductionModeManager<br/>Validation Logic]
+        HM[HotfixManager<br/>Pipeline Orchestrator]
+        GHA[GitHubApiManager<br/>PR Creation]
+        GSM[GatewayScriptModule<br/>RPC Implementation]
+    end
+
+    subgraph "Designer (git-designer)"
+        DH[DesignerHook<br/>Config Cache + Save Prompt]
+        GAM[GitActionManager<br/>Hotfix Detection]
+        PMP[ProductionModePopup<br/>Safety Checklist]
+        HCD[HotfixCommitDialog<br/>Description + Message]
+        HPD[HotfixProgressDialog<br/>Real-time Progress]
+        BADGE[PRODUCTION Badge<br/>Status Bar]
+    end
+
+    YAML -->|parsed at startup| DB
+    DB -->|read at runtime| PMM
+    DB -->|read at runtime| GSM
+    GSM -->|delegates to| PMM
+    GSM -->|delegates to| HM
+    HM -->|creates PRs via| GHA
+    HM -->|persists status to| DB
+
+    GSM <-->|RPC| DH
+    DH -->|caches config| GAM
+    DH -->|shows/hides| BADGE
+    GAM -->|pull guard| PMP
+    GAM -->|hotfix detection| HCD
+    HCD -->|on confirm| HPD
+    HPD -->|polls progress| GSM
+```
+
 ## Configuration
 
 ### YAML (Recommended for Automated Deployments)
@@ -58,61 +100,199 @@ When production mode is active, the Designer shows:
 
 ### Operation Guards
 
-| Operation | Behavior | Details |
-|-----------|----------|---------|
-| **Pull** | Safety checklist required | Shows a warning popup with 4 safety checkboxes that must all be checked before proceeding. Also validates: repo is in a safe state, current branch matches production branch, tags match pattern. |
-| **Push** | Warning for production branch | Shows a confirmation dialog when pushing to the configured production branch. Non-production branches push without warning. |
-| **Commit** | Hotfix workflow triggered | When committing on the production branch, the module detects this as a hotfix and routes to the automated hotfix workflow (see below). |
-| **Branch switch** | Blocked | Branch switching is disabled in production mode. All branching is handled automatically by the hotfix workflow. |
-| **Pull on hotfix branch** | Blocked | Pull is completely disabled on hotfix branches to keep them isolated. |
+```mermaid
+flowchart TD
+    OP[User triggers Git operation] --> TYPE{Which operation?}
+
+    TYPE -->|Pull| HOTFIX_CHECK_PULL{On hotfix/* branch?}
+    HOTFIX_CHECK_PULL -->|Yes| BLOCK_PULL[BLOCKED<br/>Pull disabled on hotfix branches]
+    HOTFIX_CHECK_PULL -->|No| PROD_CHECK_PULL{Production mode?}
+    PROD_CHECK_PULL -->|No| NORMAL_PULL[Normal pull]
+    PROD_CHECK_PULL -->|Yes| SAFETY[ProductionModePopup<br/>4-item safety checklist]
+    SAFETY --> VALIDATE{Validate:<br/>Repo safe?<br/>Correct branch?<br/>Tags match?}
+    VALIDATE -->|All pass| EXEC_PULL[Execute pull]
+    VALIDATE -->|Any fail| BLOCK_VALIDATION[BLOCKED<br/>with reason]
+
+    TYPE -->|Push| PROD_CHECK_PUSH{Production mode?}
+    PROD_CHECK_PUSH -->|No| NORMAL_PUSH[Normal push]
+    PROD_CHECK_PUSH -->|Yes| PUSH_TARGET{Pushing to<br/>production branch?}
+    PUSH_TARGET -->|No| EXEC_PUSH[Execute push]
+    PUSH_TARGET -->|Yes| PUSH_WARN[Warning + confirmation<br/>required]
+    PUSH_WARN --> EXEC_PUSH
+
+    TYPE -->|Commit| PROD_CHECK_COMMIT{Production mode +<br/>on production branch?}
+    PROD_CHECK_COMMIT -->|No| NORMAL_COMMIT[Normal commit]
+    PROD_CHECK_COMMIT -->|Yes| HOTFIX[Hotfix Workflow]
+
+    TYPE -->|Branch Switch| PROD_CHECK_BRANCH{Production mode?}
+    PROD_CHECK_BRANCH -->|No| NORMAL_BRANCH[Normal branch switch]
+    PROD_CHECK_BRANCH -->|Yes| BLOCK_BRANCH[BLOCKED<br/>Use hotfix workflow]
+
+    style BLOCK_PULL fill:#FFCDD2
+    style BLOCK_VALIDATION fill:#FFCDD2
+    style BLOCK_BRANCH fill:#FFCDD2
+    style HOTFIX fill:#C8E6C9
+    style PUSH_WARN fill:#FFF9C4
+```
 
 ### Repository Safety Checks
 
 Before pull or push operations, the module verifies:
 
-1. **Repository state is SAFE** — not in the middle of a merge, rebase, or cherry-pick
+1. **Repository state is SAFE** -- not in the middle of a merge, rebase, or cherry-pick
 2. **No uncommitted changes** to tracked files (modified, added, or removed)
 
 Untracked files are intentionally ignored since Ignition may create temporary files in the project directory.
 
+### Pull Validation Flow
+
+```mermaid
+flowchart TD
+    START[validatePull called] --> PM{Production mode<br/>enabled?}
+    PM -->|No| ALLOW[Allow pull]
+    PM -->|Yes| HB{On hotfix/*<br/>branch?}
+    HB -->|Yes| BLOCK_HB[BLOCK: Pull disabled<br/>on hotfix branches]
+    HB -->|No| SAFE{Repository<br/>safe?}
+    SAFE -->|No| BLOCK_SAFE[BLOCK: Uncommitted changes<br/>or merge/rebase in progress]
+    SAFE -->|Yes| BRANCH{Current branch =<br/>production branch?}
+    BRANCH -->|No| BLOCK_BRANCH[BLOCK: Wrong branch]
+    BRANCH -->|Yes| TAGS{Tag pattern<br/>configured?}
+    TAGS -->|No| ALLOW
+    TAGS -->|Yes| TAG_MATCH{Any tag matches<br/>pattern?}
+    TAG_MATCH -->|No| BLOCK_TAGS[BLOCK: No matching tags]
+    TAG_MATCH -->|Yes| ALLOW
+
+    style ALLOW fill:#C8E6C9
+    style BLOCK_HB fill:#FFCDD2
+    style BLOCK_SAFE fill:#FFCDD2
+    style BLOCK_BRANCH fill:#FFCDD2
+    style BLOCK_TAGS fill:#FFCDD2
+```
+
 ## Hotfix Workflow
 
 When a control engineer needs to make an emergency fix on a production gateway, the hotfix workflow provides a controlled path that maintains full Git traceability.
+
+### End-to-End Flow
+
+```mermaid
+sequenceDiagram
+    participant E as Engineer
+    participant D as Designer
+    participant G as Gateway
+    participant GH as GitHub
+
+    E->>D: Makes fix, saves (Ctrl+S)
+    D->>E: "Commit changes?" prompt
+    E->>D: Clicks "Yes"
+
+    D->>G: getProductionModeConfig()
+    G-->>D: config (productionMode=true, branch=main)
+    D->>G: getCurrentBranch()
+    G-->>D: "main"
+
+    Note over D: Detects: production mode + on production branch = HOTFIX
+
+    D->>E: Shows HotfixCommitDialog
+    E->>D: Enters description, message, selects changes
+    E->>D: Clicks "Proceed with Hotfix"
+
+    D->>G: executeHotfix(project, user, desc, msg, changes)
+
+    Note over D: Shows HotfixProgressDialog (polls every 500ms)
+
+    rect rgb(200, 230, 201)
+        Note over G: CRITICAL STEPS (rollback on failure)
+        G->>G: 1. Create branch hotfix/<desc>
+        G->>G: 2. Switch to hotfix branch
+        G->>G: 3. Commit changes
+    end
+
+    rect rgb(255, 249, 196)
+        Note over G: BEST-EFFORT STEPS (continue on failure)
+        G->>GH: 4. Push hotfix branch
+        G->>GH: 5. Create PR with labels
+        GH-->>G: PR #42 URL
+        G->>G: 6. Switch back to main
+        G->>G: 7. Merge hotfix into local main
+        G->>G: 8. Delete hotfix branch
+    end
+
+    G->>G: Persist status to DB
+    D->>G: getHotfixProgress() (polling)
+    G-->>D: HotfixResult (all steps complete)
+    D->>E: Shows clickable PR link
+```
 
 ### How It Works
 
 1. **Engineer makes a fix** in the Ignition Designer (edits a script, modifies a view, etc.)
 2. **Saves the project** (Ctrl+S)
 3. **Module prompts:** "You've saved changes on a production gateway. Would you like to commit and track these changes?"
-4. **Engineer clicks Yes** — the module detects the hotfix scenario (production mode + on production branch)
-5. **Hotfix Commit Dialog appears** — the engineer provides:
+4. **Engineer clicks Yes** -- the module detects the hotfix scenario (production mode + on production branch)
+5. **Hotfix Commit Dialog appears** -- the engineer provides:
    - A short **hotfix description** (used in branch name and PR title)
    - A **commit message** explaining the fix
    - Selects which **changed resources** to include
-6. **Engineer clicks "Proceed with Hotfix"** — the automated pipeline runs:
-
-```
-Step 1: Create branch      hotfix/<description>
-Step 2: Switch to branch    hotfix/<description>
-Step 3: Commit changes      On the hotfix branch
-Step 4: Push to remote      Pushes the hotfix branch
-Step 5: Create PR           GitHub PR with hotfix/production labels
-Step 6: Switch back         Returns to production branch
-Step 7: Merge locally       Merges hotfix into local production branch
-Step 8: Cleanup             Deletes local hotfix branch
-```
-
+6. **Engineer clicks "Proceed with Hotfix"** -- the automated pipeline runs
 7. **Progress dialog** shows real-time status of each step with a clickable PR link on completion
 
-### Pipeline Behavior
+### Pipeline Steps
 
-**Steps 1-3 are critical.** If any of these fail, the pipeline rolls back (switches back to the production branch, deletes the hotfix branch) and reports the error. The engineer's working copy is restored to its pre-hotfix state.
+| # | Step | Git Operation | Failure Handling |
+|---|------|---------------|------------------|
+| 1 | Create hotfix branch | `git branch hotfix/<name>` | Rollback, report error |
+| 2 | Switch to hotfix branch | `git checkout hotfix/<name>` | Delete branch, report error |
+| 3 | Commit changes | `git add <files> && git commit` | Switch back, delete branch, report error |
+| 4 | Push hotfix branch | `git push <remote> hotfix/<name>` | Warn user, continue with local steps |
+| 5 | Create PR | GitHub REST API | Warn user, continue with local steps |
+| 6 | Switch back to main | `git checkout main` | Warn user |
+| 7 | Merge hotfix into local main | `git merge hotfix/<name>` | Warn user |
+| 8 | Delete local hotfix branch | `git branch -d hotfix/<name>` | Non-critical, log only |
 
-**Steps 4-8 are best-effort.** If push fails (e.g., authentication error), the commit still exists locally. If PR creation fails, the push still succeeded. The pipeline continues with remaining steps and reports what failed.
+### Why Local Merge (Not Remote Pull)
 
-### Local Merge (Not Remote Pull)
+```mermaid
+graph LR
+    subgraph "Remote (GitHub)"
+        RM[main<br/>may have other<br/>unrelated merges]
+    end
+
+    subgraph "Local Gateway"
+        LM[main<br/>only what was<br/>deliberately deployed]
+        HB[hotfix/fix-pump-alarm<br/>your one fix commit]
+    end
+
+    HB -->|local merge| LM
+    RM -.->|NOT pulled| LM
+
+    style RM fill:#FFCDD2
+    style HB fill:#C8E6C9
+    style LM fill:#C8E6C9
+```
 
 After the hotfix, the module merges the hotfix branch into the **local** production branch rather than pulling from the remote. This is critical: the remote production branch may contain other merged changes not intended for this gateway. The local merge only brings in the engineer's fix.
+
+### Hotfix Branch Rules
+
+When on a `hotfix/*` branch, production mode behavior changes:
+
+```mermaid
+graph TD
+    HB[On hotfix/* branch] --> PULL{Pull?}
+    HB --> PUSH{Push?}
+    HB --> COMMIT{Commit?}
+
+    PULL --> BLOCKED[BLOCKED<br/>Hotfix is a sealed environment]
+    PUSH --> ALLOWED[ALLOWED<br/>No warning needed]
+    COMMIT --> NORMAL[Normal commit<br/>No hotfix auto-detection]
+
+    style BLOCKED fill:#FFCDD2
+    style ALLOWED fill:#C8E6C9
+    style NORMAL fill:#E3F2FD
+```
+
+A hotfix branch is a **sealed environment** -- the engineer's fix and nothing else. The only way changes enter is through their commits. The only way it reaches remote is through push. No pulls, no merges from other branches.
 
 ### GitHub PR
 
@@ -121,13 +301,39 @@ The hotfix workflow automatically creates a GitHub Pull Request with:
 - **Title:** `HOTFIX: <description>`
 - **Labels:** `hotfix`, `production`
 - **Body:** Includes metadata table (who, when, which gateway, which project, commit hash), list of changed resources, and commit message
-- Clearly marked as **"Already Live"** — the fix is already running on production
+- Clearly marked as **"Already Live"** -- the fix is already running on production
 
 The PR exists for review and traceability. Merging it on GitHub propagates the fix to the main branch for other environments.
 
 ### Authentication
 
 PR creation reuses the existing Git credentials (the PAT stored in the user's password field). The token needs `repo` scope to create PRs and add labels. If using SSH authentication, PR creation is skipped (SSH keys can't authenticate to the GitHub REST API).
+
+## Data Flow
+
+### Configuration Loading
+
+```mermaid
+flowchart LR
+    YAML[git.yaml] -->|parsed at startup| PC[ProjectConfig<br/>SnakeYAML + reflection]
+    PC -->|loadFromProjectConfig| GCC[GitCommissioningConfig]
+    GCC -->|setProductionMode<br/>setProductionBranch<br/>setProductionTagPattern| DB[(GitProjectsConfigRecord<br/>Internal DB)]
+    DB -->|read at runtime| PMM[ProductionModeManager<br/>buildConfig]
+    PMM --> DTO[ProductionModeConfig<br/>DTO over RPC]
+    DTO -->|serialized to Designer| DH[DesignerHook<br/>cached config]
+```
+
+### Designer Config Caching
+
+The Designer caches the `ProductionModeConfig` to avoid RPC calls on every save:
+
+| Event | Action |
+|-------|--------|
+| Designer startup | Fetch and cache config |
+| Every 5 minutes | Background refresh |
+| After branch switch | Invalidate cache |
+| After pull | Invalidate cache |
+| After hotfix completion | Invalidate cache |
 
 ## Admin Visibility
 
@@ -149,7 +355,7 @@ On failure:
 ```
 [Production Hotfix] Push FAILED: authentication error
 [Production Hotfix] PR creation SKIPPED (push failed)
-[Production Hotfix] COMPLETED WITH WARNINGS — push failed, manual intervention needed
+[Production Hotfix] COMPLETED WITH WARNINGS -- push failed, manual intervention needed
 ```
 
 ### Database Status
@@ -202,9 +408,9 @@ git checkout main   # Or whatever your production_branch is
 ### Pull validation fails with "tags do not match pattern"
 
 No tags in the repository match the configured `production_tagPattern`. Either:
-- The repository hasn't been tagged yet — create a tag matching the pattern
-- The pattern is wrong — check `production_tagPattern` in `git.yaml`
-- Tags weren't fetched — the pull operation fetches tags automatically, but if this is the first pull after setup, you may need to fetch manually
+- The repository hasn't been tagged yet -- create a tag matching the pattern
+- The pattern is wrong -- check `production_tagPattern` in `git.yaml`
+- Tags weren't fetched -- the pull operation fetches tags automatically, but if this is the first pull after setup, you may need to fetch manually
 
 ### Hotfix push failed
 
@@ -222,9 +428,9 @@ git push origin hotfix/<branch-name>
 ### Hotfix PR creation failed
 
 The push succeeded but the PR wasn't created. Common causes:
-- PAT doesn't have `repo` scope — update the token
-- Repository URL isn't a GitHub URL — PR creation only works with `github.com` repos
-- SSH authentication — PR creation requires HTTPS with a PAT
+- PAT doesn't have `repo` scope -- update the token
+- Repository URL isn't a GitHub URL -- PR creation only works with `github.com` repos
+- SSH authentication -- PR creation requires HTTPS with a PAT
 
 You can create the PR manually on GitHub from the pushed hotfix branch.
 
@@ -242,3 +448,12 @@ Successful addition of field: production_mode: true
 ### Branch switching shows "disabled in production mode"
 
 This is expected behavior. In production mode, all branching is handled by the hotfix workflow. If you need to switch branches for maintenance, you must do it via the gateway container's command line.
+
+### Progress dialog shows all grey/blank icons
+
+This was a known timing issue (fixed). If you encounter it:
+1. Close the dialog
+2. Check gateway logs for `[Production Hotfix]` entries -- the pipeline likely completed successfully
+3. Restart the Designer and retry
+
+The fix ensures the completed pipeline result stays in memory until the progress dialog reads it.
