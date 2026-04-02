@@ -8,8 +8,10 @@ import com.axone_io.ignition.git.managers.GitManager;
 import com.axone_io.ignition.git.managers.GitProjectManager;
 import com.axone_io.ignition.git.managers.GitTagManager;
 import com.axone_io.ignition.git.managers.GitThemeManager;
+import com.axone_io.ignition.git.managers.HotfixManager;
 import com.axone_io.ignition.git.managers.ProductionModeManager;
 import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
+import com.axone_io.ignition.git.records.GitReposUsersRecord;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
 import org.eclipse.jgit.api.*;
@@ -1128,22 +1130,69 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         }
     }
 
-    // --- Hotfix operations (stubs — full implementation in Task 6) ---
+    // --- Hotfix operations ---
 
     @Override
     protected HotfixResult executeHotfixImpl(String projectName, String userName,
                                              String hotfixDescription, String commitMessage,
                                              String[] changes) throws Exception {
-        throw new UnsupportedOperationException("Not yet implemented");
+        logger.info("[Production Hotfix] executeHotfix called for project '" + projectName + "' by user '" + userName + "'");
+
+        GitProjectsConfigRecord configRecord = GitManager.getGitProjectConfigRecord(projectName);
+        GitReposUsersRecord userRecord = GitManager.getGitReposUserRecord(configRecord, userName);
+        ProductionModeConfig prodConfig = ProductionModeManager.buildConfig(configRecord);
+
+        if (!prodConfig.isProductionMode()) {
+            throw new RuntimeException("Hotfix workflow requires production mode to be enabled");
+        }
+
+        String repoUri = configRecord.getURI();
+        String token = configRecord.isSSHAuthentication() ? null : userRecord.getPassword();
+        String gatewayName;
+        try {
+            gatewayName = java.net.InetAddress.getLocalHost().getHostName();
+        } catch (Exception e) {
+            gatewayName = "ignition-gateway";
+        }
+        String productionBranch = prodConfig.getProductionBranch();
+        String userEmail = userRecord.getEmail();
+
+        if (productionBranch == null || productionBranch.isEmpty()) {
+            productionBranch = "main";
+        }
+
+        try (Git git = getGit(getProjectFolderPath(projectName))) {
+            return HotfixManager.execute(
+                git, projectName, userName, hotfixDescription, commitMessage, changes,
+                userEmail, repoUri, token, gatewayName, productionBranch,
+                configRecord, context.getPersistenceInterface()
+            );
+        }
     }
 
     @Override
     protected HotfixResult getHotfixProgressImpl(String projectName) throws Exception {
-        throw new UnsupportedOperationException("Not yet implemented");
+        HotfixResult active = HotfixManager.getActiveHotfix(projectName);
+        if (active != null) {
+            return active;
+        }
+        return getLastHotfixStatusImpl(projectName);
     }
 
     @Override
     protected HotfixResult getLastHotfixStatusImpl(String projectName) throws Exception {
-        throw new UnsupportedOperationException("Not yet implemented");
+        GitProjectsConfigRecord config = GitManager.getGitProjectConfigRecord(projectName);
+        HotfixResult result = new HotfixResult();
+        result.setPipelineComplete(true);
+
+        String status = config.getLastHotfixStatus();
+        if (status == null || status.isEmpty()) {
+            return result;
+        }
+
+        result.setPipelineSuccess("COMPLETED".equals(status));
+        result.setHotfixBranch(config.getLastHotfixBranch());
+        result.setPrUrl(config.getLastHotfixPRUrl());
+        return result;
     }
 }
