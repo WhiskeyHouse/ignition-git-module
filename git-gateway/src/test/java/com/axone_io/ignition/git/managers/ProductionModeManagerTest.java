@@ -291,4 +291,41 @@ public class ProductionModeManagerTest {
         assertFalse(message.contains("Production Branch:"));
         assertFalse(message.contains("Required Tag Pattern:"));
     }
+
+    // --- Hotfix branch awareness tests ---
+
+    @Test
+    public void isHotfixBranch_hotfixPrefix_returnsTrue() {
+        assertTrue(ProductionModeManager.isHotfixBranch("hotfix/fix-pump-alarm"));
+    }
+
+    @Test
+    public void isHotfixBranch_mainBranch_returnsFalse() {
+        assertFalse(ProductionModeManager.isHotfixBranch("main"));
+    }
+
+    @Test
+    public void isHotfixBranch_featureBranch_returnsFalse() {
+        assertFalse(ProductionModeManager.isHotfixBranch("feature/new-widget"));
+    }
+
+    @Test
+    public void validatePull_onHotfixBranch_blocksPull() throws Exception {
+        git.branchCreate().setName("hotfix/fix-pump-alarm").call();
+        git.checkout().setName("hotfix/fix-pump-alarm").call();
+
+        ProductionModeConfig config = new ProductionModeConfig(true, "main", null);
+        assertFalse(ProductionModeManager.validatePull(git, config));
+        assertTrue(config.getWarningMessage().contains("disabled on hotfix branches"));
+    }
+
+    @Test
+    public void validatePush_onHotfixBranch_allowsWithoutWarning() throws Exception {
+        git.branchCreate().setName("hotfix/fix-pump-alarm").call();
+        git.checkout().setName("hotfix/fix-pump-alarm").call();
+
+        ProductionModeConfig config = new ProductionModeConfig(true, "main", null);
+        assertTrue(ProductionModeManager.validatePush(git, config, "hotfix/fix-pump-alarm"));
+        assertFalse(config.hasWarnings());
+    }
 }

@@ -33,6 +33,13 @@ public class ProductionModeManager {
     }
 
     /**
+     * Check if a branch name is a hotfix branch.
+     */
+    public static boolean isHotfixBranch(String branchName) {
+        return branchName != null && branchName.startsWith("hotfix/");
+    }
+
+    /**
      * Validate if a pull operation is safe in production mode.
      * Checks:
      * - If production mode is enabled
@@ -46,6 +53,17 @@ public class ProductionModeManager {
         }
 
         try {
+            String currentBranch = git.getRepository().getBranch();
+
+            // Block pull on hotfix branches — hotfix is a sealed environment
+            if (isHotfixBranch(currentBranch)) {
+                String warning = "Pull is disabled on hotfix branches. Complete your hotfix first, then pull on main.";
+                logger.warn(warning);
+                config.setWarningMessage(warning);
+                config.setValid(false);
+                return false;
+            }
+
             // Check repository safety first
             if (!isRepositorySafe(git.getRepository())) {
                 String warning = "Production mode: Repository is not in a safe state for pull. " +
@@ -56,7 +74,6 @@ public class ProductionModeManager {
                 return false;
             }
 
-            String currentBranch = git.getRepository().getBranch();
             String productionBranch = config.getProductionBranch();
 
             // Check if we're on the production branch
@@ -113,6 +130,12 @@ public class ProductionModeManager {
         }
 
         try {
+            // Hotfix branches are expected to be pushed — no warning needed
+            if (isHotfixBranch(targetBranch)) {
+                logger.info("Production mode: allowing push on hotfix branch '{}'", targetBranch);
+                return true;
+            }
+
             // Check repository safety first — this is a hard block
             if (!isRepositorySafe(git.getRepository())) {
                 String warning = "Production mode: Repository is not in a safe state for push. " +
