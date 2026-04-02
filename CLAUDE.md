@@ -66,8 +66,14 @@ Scope Legend: **C** = Client (Vision), **D** = Designer, **G** = Gateway
 | `ClientScriptModule` | git-client | Client RPC delegations |
 | `GitActionManager` | git-designer | Designer UI actions and popups |
 | `BranchPopup` | git-designer | Branch switching UI |
-| `DesignerHook` | git-designer | Designer module lifecycle |
+| `DesignerHook` | git-designer | Designer module lifecycle, production config caching |
 | `GatewayHook` | git-gateway | Gateway module lifecycle |
+| `ProductionModeManager` | git-gateway | Production mode validation (pull/push/hotfix branch checks) |
+| `HotfixManager` | git-gateway | Hotfix pipeline orchestrator (8-step automated workflow) |
+| `GitHubApiManager` | git-gateway | GitHub REST API client for PR creation |
+| `ProductionModePopup` | git-designer | Safety checklist dialog for production operations |
+| `HotfixCommitDialog` | git-designer | Hotfix commit dialog (description, message, changes) |
+| `HotfixProgressDialog` | git-designer | Real-time pipeline progress with clickable PR link |
 
 ### Data Transfer Objects (DTOs)
 
@@ -75,6 +81,8 @@ Scope Legend: **C** = Client (Vision), **D** = Designer, **G** = Gateway
 - `BranchStatus` - Repository state (uncommitted changes, conflicts, merge state)
 - `CommitInfo` - Commit metadata (hash, message, author, timestamp)
 - `UncommittedChange` - Changed file info (path, type, actor)
+- `ProductionModeConfig` - Production mode settings and validation state
+- `HotfixResult` - Hotfix pipeline step statuses, PR URL, errors
 
 ## RPC Considerations
 
@@ -136,8 +144,28 @@ git status  # Check state
 git merge --abort  # If in merge state
 ```
 
+## Production Mode
+
+Production mode protects production gateways from accidental Git operations. When enabled:
+
+- **Pull** requires a safety checklist (4 checkboxes) + validates repo state, branch, and tags
+- **Push** warns when targeting the production branch
+- **Branch switching** is blocked entirely
+- **Commits** on the production branch trigger the automated **hotfix workflow** (branch → commit → push → create PR → merge locally → cleanup)
+- **PRODUCTION** badge shown in Designer status bar
+
+Configured via `git.yaml`:
+```yaml
+production_mode: true
+production_branch: main
+production_tagPattern: "v*"
+```
+
+Full documentation: [docs/production-mode.md](docs/production-mode.md)
+
 ## File Locations in Docker Container
 
 - Module: `/usr/local/bin/ignition/user-lib/modules/Git-unsigned.modl`
 - Projects: `/usr/local/bin/ignition/data/projects/<project-name>/`
 - Git repos: `/usr/local/bin/ignition/data/projects/<project-name>/.git/`
+- Tag backups: `/usr/local/bin/ignition/data/projects/<project-name>/.git/tags_backup/`
