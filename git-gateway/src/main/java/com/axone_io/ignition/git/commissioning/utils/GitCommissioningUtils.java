@@ -356,7 +356,9 @@ public class GitCommissioningUtils {
                 yamlKey.equals("user_name") || yamlKey.equals("user_email") ||
                 yamlKey.equals("user_password") || yamlKey.equals("commissioning_importThemes") ||
                 yamlKey.equals("commissioning_importTags") || yamlKey.equals("commissioning_importImages") ||
-                yamlKey.equals("commissioning_enforceBranch")) {
+                yamlKey.equals("commissioning_enforceBranch") ||
+                yamlKey.equals("production_mode") || yamlKey.equals("production_branch") ||
+                yamlKey.equals("production_tagPattern")) {
             return yamlKey; // Your field names already match the YAML keys
         }
 
