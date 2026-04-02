@@ -75,6 +75,8 @@ public class HotfixProgressDialog extends JDialog {
         summaryPane.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
         summaryPane.setFont(new Font("Dialog", Font.BOLD, 12));
         summaryPane.setAlignmentX(Component.LEFT_ALIGNMENT);
+        summaryPane.setPreferredSize(new Dimension(500, 40));
+        summaryPane.setText("<html><i style='color:gray;'>Waiting for pipeline to complete...</i></html>");
         summaryPane.addHyperlinkListener(e -> {
             if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
                 try {
@@ -143,8 +145,8 @@ public class HotfixProgressDialog extends JDialog {
                         "\u2014 check steps above.</html>");
                 }
 
-                // Resize to fit content
-                pack();
+                summaryPane.revalidate();
+                summaryPane.repaint();
             }
         } catch (Exception e) {
             logger.error("Error polling hotfix progress", e);
