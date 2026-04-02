@@ -40,6 +40,7 @@ public class DesignerHook extends AbstractDesignerModuleHook {
     public static String projectName;
     public static String userName;
     JPanel gitStatusBar;
+    JLabel productionBadge;
     Timer gitUserTimer;
     PopupMenuListener docsPopupListener;
     JPopupMenu sharedPopupMenuRef;
@@ -134,6 +135,19 @@ public class DesignerHook extends AbstractDesignerModuleHook {
         JLabel labelUserIcon = new JLabel(IconUtils.getIcon(userIconPath));
         labelUserIcon.setSize(35,35);
         gitStatusBar.add(labelUserIcon);
+
+        // Production mode badge — shown when production mode is active
+        productionBadge = new JLabel(" PRODUCTION ");
+        productionBadge.setFont(new java.awt.Font("Dialog", java.awt.Font.BOLD, 10));
+        productionBadge.setForeground(java.awt.Color.WHITE);
+        productionBadge.setBackground(new java.awt.Color(211, 47, 47));
+        productionBadge.setOpaque(true);
+        productionBadge.setBorder(javax.swing.BorderFactory.createCompoundBorder(
+            javax.swing.BorderFactory.createLineBorder(new java.awt.Color(183, 28, 28), 1),
+            javax.swing.BorderFactory.createEmptyBorder(2, 6, 2, 6)
+        ));
+        productionBadge.setVisible(false); // Hidden by default, shown after config check
+        gitStatusBar.add(productionBadge);
 
         statusBar.addDisplay(gitStatusBar);
 
@@ -240,6 +254,11 @@ public class DesignerHook extends AbstractDesignerModuleHook {
         try {
             cachedProductionConfig = rpc.getProductionModeConfig(projectName);
             logger.debug("Refreshed cached production config: {}", cachedProductionConfig);
+            // Update status bar badge on EDT
+            if (productionBadge != null) {
+                boolean show = cachedProductionConfig != null && cachedProductionConfig.isProductionMode();
+                SwingUtilities.invokeLater(() -> productionBadge.setVisible(show));
+            }
         } catch (Exception e) {
             logger.debug("Unable to refresh production config cache: {}", e.getMessage());
         }
