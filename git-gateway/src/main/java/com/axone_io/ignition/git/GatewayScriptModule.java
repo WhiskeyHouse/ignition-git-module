@@ -1,6 +1,7 @@
 package com.axone_io.ignition.git;
 
 import com.axone_io.ignition.git.commissioning.utils.GitCommissioningUtils;
+import com.axone_io.ignition.git.dto.HotfixResult;
 import com.axone_io.ignition.git.dto.ProductionModeConfig;
 import com.axone_io.ignition.git.managers.GitImageManager;
 import com.axone_io.ignition.git.managers.GitManager;
@@ -1125,5 +1126,24 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             logger.error("Error restoring tags from backup for project: " + projectName, e);
             throw new RuntimeException("Failed to restore tags from backup", e);
         }
+    }
+
+    // --- Hotfix operations (stubs — full implementation in Task 6) ---
+
+    @Override
+    protected HotfixResult executeHotfixImpl(String projectName, String userName,
+                                             String hotfixDescription, String commitMessage,
+                                             String[] changes) throws Exception {
+        throw new UnsupportedOperationException("Not yet implemented");
+    }
+
+    @Override
+    protected HotfixResult getHotfixProgressImpl(String projectName) throws Exception {
+        throw new UnsupportedOperationException("Not yet implemented");
+    }
+
+    @Override
+    protected HotfixResult getLastHotfixStatusImpl(String projectName) throws Exception {
+        throw new UnsupportedOperationException("Not yet implemented");
     }
 }
