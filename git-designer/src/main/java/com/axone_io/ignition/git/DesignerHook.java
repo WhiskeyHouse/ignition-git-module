@@ -1,7 +1,9 @@
 package com.axone_io.ignition.git;
 
 import com.axone_io.ignition.git.actions.GitBaseAction;
+import com.axone_io.ignition.git.dto.ProductionModeConfig;
 import com.axone_io.ignition.git.managers.DocsPopupMenuListener;
+import com.axone_io.ignition.git.managers.GitActionManager;
 import com.axone_io.ignition.git.utils.IconUtils;
 import com.inductiveautomation.ignition.client.gateway_interface.GatewayConnection;
 import com.inductiveautomation.ignition.common.BundleUtil;
@@ -41,6 +43,9 @@ public class DesignerHook extends AbstractDesignerModuleHook {
     Timer gitUserTimer;
     PopupMenuListener docsPopupListener;
     JPopupMenu sharedPopupMenuRef;
+    private static ProductionModeConfig cachedProductionConfig;
+    private Timer productionConfigRefreshTimer;
+
     @Override
     public void initializeScriptManager(ScriptManager manager) {
         super.initializeScriptManager(manager);
@@ -101,6 +106,10 @@ public class DesignerHook extends AbstractDesignerModuleHook {
         initToolBar();
         initDocsContextMenu();
 
+        // Cache production mode config for save-hook detection
+        refreshProductionConfig();
+        productionConfigRefreshTimer = new Timer(300000, e -> refreshProductionConfig()); // 5 minutes
+        productionConfigRefreshTimer.start();
     }
 
     private void initStatusBar(){
@@ -227,6 +236,24 @@ public class DesignerHook extends AbstractDesignerModuleHook {
         return null;
     }
 
+    private void refreshProductionConfig() {
+        try {
+            cachedProductionConfig = rpc.getProductionModeConfig(projectName);
+            logger.debug("Refreshed cached production config: {}", cachedProductionConfig);
+        } catch (Exception e) {
+            logger.debug("Unable to refresh production config cache: {}", e.getMessage());
+        }
+    }
+
+    public static ProductionModeConfig getCachedProductionConfig() {
+        return cachedProductionConfig;
+    }
+
+    /** Called after operations that may change production state (pull, branch switch, hotfix). */
+    public static void invalidateProductionConfigCache() {
+        cachedProductionConfig = null;
+    }
+
     @Override
     public void notifyProjectSaveStart(SaveContext save) {
         try {
@@ -239,8 +266,24 @@ public class DesignerHook extends AbstractDesignerModuleHook {
     }
 
     @Override
-    public void notifyProjectSaveDone(){
+    public void notifyProjectSaveDone() {
         super.notifyProjectSaveDone();
+
+        // In production mode, prompt the engineer to commit after saving
+        if (cachedProductionConfig != null && cachedProductionConfig.isProductionMode()) {
+            SwingUtilities.invokeLater(() -> {
+                int result = JOptionPane.showConfirmDialog(
+                    context.getFrame(),
+                    "You've saved changes on a production gateway.\nWould you like to commit and track these changes?",
+                    "Production Mode \u2014 Commit Changes?",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.QUESTION_MESSAGE
+                );
+                if (result == JOptionPane.YES_OPTION) {
+                    GitActionManager.showCommitWithHotfixDetection(projectName, userName);
+                }
+            });
+        }
     }
 
     @Override
@@ -254,6 +297,10 @@ public class DesignerHook extends AbstractDesignerModuleHook {
         statusBar.removeDisplay(gitStatusBar);
 
         gitUserTimer.stop();
+
+        if (productionConfigRefreshTimer != null) {
+            productionConfigRefreshTimer.stop();
+        }
 
         if (sharedPopupMenuRef != null && docsPopupListener != null) {
             sharedPopupMenuRef.removePopupMenuListener(docsPopupListener);
