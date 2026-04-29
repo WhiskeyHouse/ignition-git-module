@@ -66,52 +66,92 @@ jobs:
             echo "POM version already matches tag: $TAG_VERSION"
           fi
 
-      # Decode keystore before build so Maven -Psign profile can use it
-      - name: Decode keystore
+      - name: Decode signing materials
         id: keystore
         if: env.HAS_KEYSTORE == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_CHAIN_BASE64: ${{ secrets.KEYSTORE_CHAIN_BASE64 }}
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > ${{ runner.temp }}/keystore.jks
-          echo "available=true" >> $GITHUB_OUTPUT
+          echo "$KEYSTORE_BASE64" | base64 --decode > "${RUNNER_TEMP}/keystore.jks"
+          echo "$KEYSTORE_CHAIN_BASE64" | base64 --decode > "${RUNNER_TEMP}/chain.p7b"
+          echo "available=true" >> "$GITHUB_OUTPUT"
 
-      - name: Build and sign module
+      - name: Build module
+        env:
+          TAG_VERSION: ${{ steps.version.outputs.tag_version }}
         run: |
-          TAG_VERSION="${{ steps.version.outputs.tag_version }}"
-          MVN_ARGS="clean package -DskipTests -Dmodule.version=$TAG_VERSION"
+          mvn clean package -DskipTests -Dmodule.version="$TAG_VERSION"
 
-          if [ "${{ steps.keystore.outputs.available }}" = "true" ]; then
-            echo "Building with code signing enabled (-Psign)"
-            mvn $MVN_ARGS -Psign \
-              -Dkeystore.path=${{ runner.temp }}/keystore.jks \
-              -Dkeystore.alias="${{ secrets.KEYSTORE_ALIAS }}" \
-              -Dkeystore.storepass="${{ secrets.KEYSTORE_STOREPASS }}" \
-              -Dkeystore.keypass="${{ secrets.KEYSTORE_KEYPASS }}"
-          else
-            echo "::warning::Building WITHOUT code signing — configure KEYSTORE_BASE64 secret to enable"
-            mvn $MVN_ARGS
-          fi
-
-      - name: Verify signature
+      # Module signing uses Inductive Automation's module-signer tool, not jarsigner —
+      # the .modl format requires a signatures.properties manifest the gateway validates.
+      # Pinned to a specific upstream commit for supply-chain stability.
+      - name: Build module-signer
         if: steps.keystore.outputs.available == 'true'
+        env:
+          MODULE_SIGNER_REF: ce362b134d03ea35e97df88528d2ccb3d2258da1
         run: |
-          jarsigner -verify -verbose -certs git-build/target/Git-unsigned.modl
-          echo "Module signature verified"
+          git clone https://github.com/inductiveautomation/module-signer.git "${RUNNER_TEMP}/module-signer"
+          cd "${RUNNER_TEMP}/module-signer"
+          git checkout "$MODULE_SIGNER_REF"
+          mvn -q clean package
+          cp target/module-signer-*-jar-with-dependencies.jar "${RUNNER_TEMP}/module-signer.jar"
+
+      - name: Sign module
+        if: steps.keystore.outputs.available == 'true'
+        env:
+          TAG_VERSION: ${{ steps.version.outputs.tag_version }}
+          KEYSTORE_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+          KEYSTORE_STOREPASS: ${{ secrets.KEYSTORE_STOREPASS }}
+          KEYSTORE_KEYPASS: ${{ secrets.KEYSTORE_KEYPASS }}
+        run: |
+          java -jar "${RUNNER_TEMP}/module-signer.jar" \
+            -keystore="${RUNNER_TEMP}/keystore.jks" \
+            -keystore-pwd="$KEYSTORE_STOREPASS" \
+            -alias="$KEYSTORE_ALIAS" \
+            -alias-pwd="$KEYSTORE_KEYPASS" \
+            -chain="${RUNNER_TEMP}/chain.p7b" \
+            -module-in=git-build/target/Git-unsigned.modl \
+            -module-out="git-build/target/Git-${TAG_VERSION}-signed.modl"
+
+      - name: Verify signed module
+        if: steps.keystore.outputs.available == 'true'
+        env:
+          TAG_VERSION: ${{ steps.version.outputs.tag_version }}
+        run: |
+          MODL="git-build/target/Git-${TAG_VERSION}-signed.modl"
+          if ! unzip -l "$MODL" | grep -q signatures.properties; then
+            echo "::error::Signed modl is missing signatures.properties"
+            exit 1
+          fi
+          if ! unzip -l "$MODL" | grep -q certificates.p7b; then
+            echo "::error::Signed modl is missing certificates.p7b"
+            exit 1
+          fi
+          echo "Module signature artifacts present:"
+          unzip -l "$MODL" | grep -E "signatures.properties|certificates.p7b"
+
+      - name: Warn if unsigned
+        if: steps.keystore.outputs.available != 'true'
+        run: |
+          echo "::warning::Building WITHOUT code signing — configure KEYSTORE_BASE64, KEYSTORE_CHAIN_BASE64, KEYSTORE_ALIAS, KEYSTORE_STOREPASS, KEYSTORE_KEYPASS secrets to enable"
 
       - name: Prepare release artifacts
         id: artifacts
+        env:
+          TAG_VERSION: ${{ steps.version.outputs.tag_version }}
+          SIGNED: ${{ steps.keystore.outputs.available }}
         run: |
-          TAG_VERSION="${{ steps.version.outputs.tag_version }}"
           cd git-build/target
 
-          if [ "${{ steps.keystore.outputs.available }}" = "true" ]; then
-            cp Git-unsigned.modl "Git-${TAG_VERSION}-signed.modl"
-            echo "release_modl=git-build/target/Git-${TAG_VERSION}-signed.modl" >> $GITHUB_OUTPUT
+          if [ "$SIGNED" = "true" ]; then
+            echo "release_modl=git-build/target/Git-${TAG_VERSION}-signed.modl" >> "$GITHUB_OUTPUT"
           else
             cp Git-unsigned.modl "Git-${TAG_VERSION}-unsigned.modl"
-            echo "release_modl=git-build/target/Git-${TAG_VERSION}-unsigned.modl" >> $GITHUB_OUTPUT
+            echo "release_modl=git-build/target/Git-${TAG_VERSION}-unsigned.modl" >> "$GITHUB_OUTPUT"
           fi
 
-          ls -lh Git-${TAG_VERSION}-*.modl
+          ls -lh "Git-${TAG_VERSION}-"*.modl
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

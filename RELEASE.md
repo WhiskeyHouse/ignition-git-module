@@ -15,6 +15,8 @@ Releases are triggered via the **Create Release** workflow dispatch in GitHub Ac
 
 ### Code Signing Keystore
 
+Ignition `.modl` files are signed using Inductive Automation's [module-signer](https://github.com/inductiveautomation/module-signer) tool (the standard `jarsigner` does **not** produce a gateway-valid signature). The Release workflow builds module-signer in CI and runs it against the unsigned `.modl`.
+
 To produce signed releases, configure these GitHub Secrets:
 
 1. **Generate a keystore** (if you don't have one):
@@ -28,20 +30,30 @@ To produce signed releases, configure these GitHub Secrets:
      -dname "CN=Your Name, OU=Your Org, O=Your Company, L=City, ST=State, C=US"
    ```
 
-2. **Encode to base64**:
+2. **Export the certificate chain** (module-signer requires a `.p7b` chain file):
    ```bash
-   base64 -i keystore.jks -o keystore.txt
+   keytool -export -rfc \
+     -alias ignition-git-module \
+     -keystore keystore.jks \
+     -file chain.p7b
    ```
 
-3. **Add GitHub Secrets** (Settings > Secrets and variables > Actions):
+3. **Encode both files to base64**:
+   ```bash
+   base64 -i keystore.jks -o keystore.txt
+   base64 -i chain.p7b   -o chain.txt
+   ```
+
+4. **Add GitHub Secrets** (Settings > Secrets and variables > Actions):
    - `KEYSTORE_BASE64` - Contents of keystore.txt
+   - `KEYSTORE_CHAIN_BASE64` - Contents of chain.txt
    - `KEYSTORE_ALIAS` - Alias used when creating the keystore
    - `KEYSTORE_STOREPASS` - Keystore password
    - `KEYSTORE_KEYPASS` - Key password
 
-4. **Delete local keystore files**:
+5. **Delete local files**:
    ```bash
-   rm keystore.jks keystore.txt
+   rm keystore.jks keystore.txt chain.p7b chain.txt
    ```
 
 ### Release PAT
@@ -109,9 +121,9 @@ The Release workflow passes the tag version to Maven via `-Dmodule.version`, whi
 
 ## Build Artifacts
 
-Each release produces:
+Each release produces one of:
 - `Git-{version}-signed.modl` - Signed module (when keystore secrets are configured)
-- `Git-{version}-unsigned.modl` - Unsigned module
+- `Git-{version}-unsigned.modl` - Unsigned module (fallback when signing secrets are missing)
 
 Artifacts are retained for 90 days and attached to the GitHub Release.
 
@@ -122,18 +134,26 @@ Artifacts are retained for 90 days and attached to the GitHub Release.
 mvn clean package -DskipTests
 ```
 
-### Signed build
+### Signed build (local)
+Maven only produces the unsigned `.modl`. To sign locally, build [module-signer](https://github.com/inductiveautomation/module-signer) once, then run it against the maven output:
 ```bash
-mvn clean package -Psign \
-  -Dkeystore.path=/path/to/keystore.jks \
-  -Dkeystore.alias=your-alias \
-  -Dkeystore.storepass=your-store-password \
-  -Dkeystore.keypass=your-key-password
+git clone https://github.com/inductiveautomation/module-signer.git /tmp/module-signer
+(cd /tmp/module-signer && mvn package)
+
+java -jar /tmp/module-signer/target/module-signer-*-jar-with-dependencies.jar \
+  -keystore=/path/to/keystore.jks \
+  -keystore-pwd=your-store-password \
+  -alias=your-alias \
+  -alias-pwd=your-key-password \
+  -chain=/path/to/chain.p7b \
+  -module-in=git-build/target/Git-unsigned.modl \
+  -module-out=git-build/target/Git-signed.modl
 ```
 
 ### Verify signature
+A signed `.modl` contains `signatures.properties` and `certificates.p7b` at the zip root:
 ```bash
-jarsigner -verify -verbose -certs git-build/target/*.modl
+unzip -l git-build/target/Git-signed.modl | grep -E "signatures.properties|certificates.p7b"
 ```
 
 ## Troubleshooting
@@ -145,7 +165,7 @@ The `RELEASE_PAT` secret may be missing or expired. Pushes using `GITHUB_TOKEN` 
 The Release workflow verifies that the POM version matches the tag. If they don't match, the Create Release workflow likely didn't run correctly. Check its logs.
 
 ### Module not signed
-Verify all four keystore secrets are set: `KEYSTORE_BASE64`, `KEYSTORE_ALIAS`, `KEYSTORE_STOREPASS`, `KEYSTORE_KEYPASS`.
+Verify all five keystore secrets are set: `KEYSTORE_BASE64`, `KEYSTORE_CHAIN_BASE64`, `KEYSTORE_ALIAS`, `KEYSTORE_STOREPASS`, `KEYSTORE_KEYPASS`. The `Decode signing materials` step is gated on `KEYSTORE_BASE64` only — if that one is set but the others are missing, signing will fail at the `Sign module` step instead of being skipped.
 
 ### npm build fails
 Ensure Node.js 18+ is installed. The workflow sets this up automatically.

@@ -110,51 +110,7 @@
 
                 </configuration>
             </plugin>
-
-            <!-- JAR Signing Plugin -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-jarsigner-plugin</artifactId>
-                <version>3.0.0</version>
-                <configuration>
-                    <skip>true</skip> <!-- Skip by default, enable in signing profile -->
-                </configuration>
-            </plugin>
         </plugins>
     </build>
-
-    <profiles>
-        <!-- Profile for signing the module -->
-        <profile>
-            <id>sign</id>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-jarsigner-plugin</artifactId>
-                        <version>3.0.0</version>
-                        <executions>
-                            <execution>
-                                <id>sign</id>
-                                <phase>package</phase>
-                                <goals>
-                                    <goal>sign</goal>
-                                </goals>
-                                <configuration>
-                                    <skip>false</skip>
-                                    <keystore>${keystore.path}</keystore>
-                                    <alias>${keystore.alias}</alias>
-                                    <storepass>${keystore.storepass}</storepass>
-                                    <keypass>${keystore.keypass}</keypass>
-                                    <archive>${project.build.directory}/${project.build.finalName}.modl</archive>
-                                    <verbose>true</verbose>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
-                </plugins>
-            </build>
-        </profile>
-    </profiles>
 
 </project>
