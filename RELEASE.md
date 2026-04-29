@@ -30,12 +30,14 @@ To produce signed releases, configure these GitHub Secrets:
      -dname "CN=Your Name, OU=Your Org, O=Your Company, L=City, ST=State, C=US"
    ```
 
-2. **Export the certificate chain** (module-signer requires a `.p7b` chain file):
+2. **Export the certificate chain** as a PKCS#7 bundle (module-signer requires a real `.p7b`, not a bare PEM cert — the Ignition gateway parses `certificates.p7b` strictly as PKCS#7 SignedData and silently rejects modules whose chain has zero parseable certs):
    ```bash
-   keytool -export -rfc \
+   keytool -exportcert -rfc \
      -alias ignition-git-module \
      -keystore keystore.jks \
-     -file chain.p7b
+     -file cert.pem
+   openssl crl2pkcs7 -nocrl -certfile cert.pem -out chain.p7b -outform DER
+   rm cert.pem
    ```
 
 3. **Encode both files to base64**:
