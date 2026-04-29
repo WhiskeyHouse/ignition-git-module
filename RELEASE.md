@@ -19,7 +19,7 @@ Ignition `.modl` files are signed using Inductive Automation's [module-signer](h
 
 To produce signed releases, configure these GitHub Secrets:
 
-1. **Generate a keystore** (if you don't have one):
+1. **Generate a keystore** with code-signing X.509 extensions (the Ignition gateway rejects certs without `extendedKeyUsage=codeSigning` — the gateway dialog will render with all-blank fields then fail with "Module does not contain a certificate" if you forget):
    ```bash
    keytool -genkeypair \
      -alias ignition-git-module \
@@ -27,7 +27,10 @@ To produce signed releases, configure these GitHub Secrets:
      -keysize 2048 \
      -validity 3650 \
      -keystore keystore.jks \
-     -dname "CN=Your Name, OU=Your Org, O=Your Company, L=City, ST=State, C=US"
+     -dname "CN=Your Name, OU=Your Org, O=Your Company, L=City, ST=State, C=US" \
+     -ext "KeyUsage=digitalSignature,keyCertSign" \
+     -ext "ExtendedKeyUsage=codeSigning" \
+     -ext "BasicConstraints=ca:true"
    ```
 
 2. **Export the certificate chain** as a PKCS#7 bundle (module-signer requires a real `.p7b`, not a bare PEM cert — the Ignition gateway parses `certificates.p7b` strictly as PKCS#7 SignedData and silently rejects modules whose chain has zero parseable certs):
