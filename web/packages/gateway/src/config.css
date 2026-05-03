@@ -185,3 +185,30 @@
 .button-group {
   margin-top: 20px;
 }
+
+.form-fieldset {
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 10px 15px;
+  margin-top: 15px;
+}
+
+.form-fieldset legend {
+  font-weight: bold;
+  padding: 0 6px;
+}
+
+.prod-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  background-color: #d9534f;
+  color: #fff;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+}
+
+.prod-off {
+  color: #999;
+}

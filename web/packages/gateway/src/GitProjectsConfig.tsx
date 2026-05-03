@@ -6,6 +6,9 @@ interface GitProject {
   id: number;
   projectName: string;
   uri: string;
+  productionMode?: boolean;
+  productionBranch?: string | null;
+  productionTagPattern?: string | null;
 }
 
 interface State {
@@ -57,7 +60,14 @@ export class GitProjectsConfig extends Component<{}, State> {
 
   handleNew = () => {
     this.setState({
-      editing: { id: 0, projectName: '', uri: '' },
+      editing: {
+        id: 0,
+        projectName: '',
+        uri: '',
+        productionMode: false,
+        productionBranch: '',
+        productionTagPattern: '',
+      },
       isNew: true
     });
   };
@@ -108,7 +118,7 @@ export class GitProjectsConfig extends Component<{}, State> {
     this.setState({ editing: null, isNew: false });
   };
 
-  handleChange = (field: keyof GitProject, value: string) => {
+  handleChange = (field: keyof GitProject, value: string | boolean) => {
     this.setState(state => ({
       editing: state.editing ? { ...state.editing, [field]: value } : null
     }));
@@ -147,6 +157,42 @@ export class GitProjectsConfig extends Component<{}, State> {
               />
               <small>Use https:// for username/password or git@github.com: for SSH</small>
             </div>
+            <fieldset className="form-fieldset">
+              <legend>Production Mode</legend>
+              <div className="form-group">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={!!editing.productionMode}
+                    onChange={(e) => this.handleChange('productionMode', e.target.checked)}
+                  />
+                  {' '}Enable production mode
+                </label>
+                <small>Adds safety guards: pull checklist, push warnings, branch-switch block, and hotfix workflow on commits.</small>
+              </div>
+              <div className="form-group">
+                <label>Production Branch:</label>
+                <input
+                  type="text"
+                  value={editing.productionBranch ?? ''}
+                  onChange={(e) => this.handleChange('productionBranch', e.target.value)}
+                  placeholder="main"
+                  disabled={!editing.productionMode}
+                />
+                <small>The protected branch (e.g. main, master, production).</small>
+              </div>
+              <div className="form-group">
+                <label>Production Tag Pattern:</label>
+                <input
+                  type="text"
+                  value={editing.productionTagPattern ?? ''}
+                  onChange={(e) => this.handleChange('productionTagPattern', e.target.value)}
+                  placeholder="v*"
+                  disabled={!editing.productionMode}
+                />
+                <small>Wildcard (v*, release-?) or regex (^v\d+\.\d+\.\d+$). Leave blank to skip tag validation.</small>
+              </div>
+            </fieldset>
             <div className="button-group">
               <button onClick={this.handleSave} className="btn-primary">Save</button>
               <button onClick={this.handleCancel} className="btn-secondary">Cancel</button>
@@ -162,13 +208,14 @@ export class GitProjectsConfig extends Component<{}, State> {
                   <th>Project Name</th>
                   <th>Repository URI</th>
                   <th>Auth Type</th>
+                  <th>Production</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {projects.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="empty">
+                    <td colSpan={5} className="empty">
                       No projects configured. Click "Add New Project" to get started.
                     </td>
                   </tr>
@@ -178,6 +225,13 @@ export class GitProjectsConfig extends Component<{}, State> {
                       <td>{project.projectName}</td>
                       <td>{project.uri}</td>
                       <td>{project.uri.toLowerCase().startsWith('http') ? 'HTTPS' : 'SSH'}</td>
+                      <td>
+                        {project.productionMode ? (
+                          <span className="prod-badge" title={`branch: ${project.productionBranch || '(unset)'}\ntag pattern: ${project.productionTagPattern || '(none)'}`}>PRODUCTION</span>
+                        ) : (
+                          <span className="prod-off">—</span>
+                        )}
+                      </td>
                       <td>
                         <button
                           onClick={() => this.handleEdit(project)}
