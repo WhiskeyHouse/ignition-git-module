@@ -68,6 +68,57 @@ public class GitTagManager {
     private static final String TAG_TYPE_FOLDER = "Folder";
     private static final String TAG_TYPE_PROVIDER = "Provider";
 
+    // Reserved on Windows: < > : " / \ | ? *. Encoding these (plus control chars and %)
+    // lets tag names round-trip through the filesystem on every OS.
+    private static final String FS_RESERVED_CHARS = "<>:\"/\\|?*";
+
+    /**
+     * Encodes a tag name so it is safe to use as a filesystem path segment on any OS.
+     * Reserved characters, control characters, and the percent sign itself are
+     * replaced with {@code %XX} hex escapes. Names with only safe characters are
+     * returned unchanged so existing repositories do not churn.
+     */
+    static String encodeFsName(String name) {
+        if (name == null || name.isEmpty()) return name;
+        StringBuilder sb = new StringBuilder(name.length());
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            if (c == '%' || c < 0x20 || FS_RESERVED_CHARS.indexOf(c) >= 0) {
+                sb.append(String.format("%%%02X", (int) c));
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Reverses {@link #encodeFsName(String)} when reading a tag name from a path
+     * segment. Unrecognised {@code %XX} sequences are left intact so legacy names
+     * that happen to contain a literal {@code %} still read correctly.
+     */
+    static String decodeFsName(String fsName) {
+        if (fsName == null || fsName.indexOf('%') < 0) return fsName;
+        StringBuilder sb = new StringBuilder(fsName.length());
+        int i = 0;
+        while (i < fsName.length()) {
+            char c = fsName.charAt(i);
+            if (c == '%' && i + 2 < fsName.length()) {
+                try {
+                    int code = Integer.parseInt(fsName.substring(i + 1, i + 3), 16);
+                    sb.append((char) code);
+                    i += 3;
+                    continue;
+                } catch (NumberFormatException ignored) {
+                    // not a valid escape — fall through and keep literal
+                }
+            }
+            sb.append(c);
+            i++;
+        }
+        return sb.toString();
+    }
+
     // ========================== IMPORT ==========================
 
     /**
@@ -357,17 +408,20 @@ public class GitTagManager {
         if (entries == null) return tags;
 
         for (File entry : entries) {
-            String name = entry.getName();
+            String fsName = entry.getName();
 
-            // Skip config and tag-groups files (tag groups are imported separately)
-            if (name.equals(TAG_CONFIG_FILENAME)) continue;
-            if (name.equals(GitTagGroupManager.TAG_GROUPS_FILENAME)) continue;
+            // Skip config and tag-groups files (tag groups are imported separately).
+            // These constants contain only safe characters, so compare against the raw filesystem name.
+            if (fsName.equals(TAG_CONFIG_FILENAME)) continue;
+            if (fsName.equals(GitTagGroupManager.TAG_GROUPS_FILENAME)) continue;
 
             // Optionally skip _types_ directory (handled separately for UDT ordering)
-            if (skipTypesDir && name.equals(TYPES_DIR_NAME)) continue;
+            if (skipTypesDir && fsName.equals(TYPES_DIR_NAME)) continue;
 
             if (entry.isDirectory()) {
-                // Recurse into subdirectory — this is a folder node
+                // Recurse into subdirectory — this is a folder node.
+                // Decode the directory name to recover the original tag name.
+                String name = decodeFsName(fsName);
                 JsonObject childTags = readTagsFromDirectory(entry.toPath(), false);
                 JsonObject folder = new JsonObject();
                 folder.addProperty("name", name);
@@ -382,8 +436,9 @@ public class GitTagManager {
                 }
                 tags.add(name, folder);
 
-            } else if (name.endsWith(".json")) {
-                String tagName = FilenameUtils.removeExtension(name);
+            } else if (fsName.endsWith(".json")) {
+                // Strip extension first, then decode — the .json suffix is always literal.
+                String tagName = decodeFsName(FilenameUtils.removeExtension(fsName));
                 try {
                     String content = Files.readString(entry.toPath());
                     JsonObject tagObj = TAG_GSON.fromJson(content, JsonObject.class);
@@ -531,8 +586,8 @@ public class GitTagManager {
 
         try {
             if (TAG_TYPE_FOLDER.equals(tagType) || TAG_TYPE_PROVIDER.equals(tagType)) {
-                // Create subdirectory and recurse
-                Path subDir = parentDir.resolve(name);
+                // Create subdirectory and recurse — encode name for filesystem safety
+                Path subDir = parentDir.resolve(encodeFsName(name));
                 Files.createDirectories(subDir);
                 writeTagsRecursively(tagJson, subDir, excludedPaths, relativePath);
 
@@ -601,7 +656,7 @@ public class GitTagManager {
         JsonObject toWrite = tagJson.deepCopy();
         toWrite.remove("name");
 
-        Path file = dir.resolve(tagName + ".json");
+        Path file = dir.resolve(encodeFsName(tagName) + ".json");
         String json = TAG_GSON.toJson(JsonUtilities.createDeterministicCopy(toWrite));
         Files.writeString(file, json);
     }
