@@ -173,6 +173,9 @@ public class GitRoutes {
                         obj.addProperty("id", p.getId());
                         obj.addProperty("projectName", p.getProjectName());
                         obj.addProperty("uri", p.getURI());
+                        obj.addProperty("productionMode", p.getProductionMode());
+                        obj.addProperty("productionBranch", p.getProductionBranch());
+                        obj.addProperty("productionTagPattern", p.getProductionTagPattern());
                         return obj;
                     })
                     .collect(Collectors.toList());
@@ -203,6 +206,9 @@ public class GitRoutes {
             obj.addProperty("id", project.getId());
             obj.addProperty("projectName", project.getProjectName());
             obj.addProperty("uri", project.getURI());
+            obj.addProperty("productionMode", project.getProductionMode());
+            obj.addProperty("productionBranch", project.getProductionBranch());
+            obj.addProperty("productionTagPattern", project.getProductionTagPattern());
             return obj;
         } catch (Exception e) {
             logger.error("Error fetching project", e);
@@ -264,6 +270,7 @@ public class GitRoutes {
 
             record.setProjectName(projectName);
             record.setURI(uri);
+            applyProductionFields(record, body);
 
             req.getGatewayContext().getPersistenceInterface().save(record);
 
@@ -272,6 +279,9 @@ public class GitRoutes {
             response.addProperty("id", record.getId());
             response.addProperty("projectName", record.getProjectName());
             response.addProperty("uri", record.getURI());
+            response.addProperty("productionMode", record.getProductionMode());
+            response.addProperty("productionBranch", record.getProductionBranch());
+            response.addProperty("productionTagPattern", record.getProductionTagPattern());
             return response;
         } catch (Exception e) {
             logger.error("Error creating project", e);
@@ -341,6 +351,7 @@ public class GitRoutes {
 
             record.setProjectName(projectName);
             record.setURI(uri);
+            applyProductionFields(record, body);
 
             req.getGatewayContext().getPersistenceInterface().save(record);
 
@@ -348,6 +359,9 @@ public class GitRoutes {
             response.addProperty("id", record.getId());
             response.addProperty("projectName", record.getProjectName());
             response.addProperty("uri", record.getURI());
+            response.addProperty("productionMode", record.getProductionMode());
+            response.addProperty("productionBranch", record.getProductionBranch());
+            response.addProperty("productionTagPattern", record.getProductionTagPattern());
             return response;
         } catch (Exception e) {
             logger.error("Error updating project", e);
@@ -383,6 +397,24 @@ public class GitRoutes {
             JsonObject error = new JsonObject();
             error.addProperty("error", e.getMessage());
             return error;
+        }
+    }
+
+    private static void applyProductionFields(GitProjectsConfigRecord record, JsonObject body) {
+        if (body.has("productionMode") && body.get("productionMode").isJsonPrimitive()) {
+            record.setProductionMode(body.get("productionMode").getAsBoolean());
+        }
+        if (body.has("productionBranch") && body.get("productionBranch").isJsonPrimitive()) {
+            String branch = body.get("productionBranch").getAsString();
+            record.setProductionBranch(branch == null || branch.trim().isEmpty() ? null : branch.trim());
+        } else if (body.has("productionBranch") && body.get("productionBranch").isJsonNull()) {
+            record.setProductionBranch(null);
+        }
+        if (body.has("productionTagPattern") && body.get("productionTagPattern").isJsonPrimitive()) {
+            String pattern = body.get("productionTagPattern").getAsString();
+            record.setProductionTagPattern(pattern == null || pattern.trim().isEmpty() ? null : pattern.trim());
+        } else if (body.has("productionTagPattern") && body.get("productionTagPattern").isJsonNull()) {
+            record.setProductionTagPattern(null);
         }
     }
 
