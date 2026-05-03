@@ -91,7 +91,7 @@
   color: #555;
 }
 
-.form-group input,
+.form-group input:not([type="checkbox"]):not([type="radio"]),
 .form-group select,
 .form-group textarea {
   width: 100%;
@@ -102,12 +102,19 @@
   box-sizing: border-box;
 }
 
-.form-group input:focus,
+.form-group input:not([type="checkbox"]):not([type="radio"]):focus,
 .form-group select:focus,
 .form-group textarea:focus {
   outline: none;
   border-color: #5cb85c;
   box-shadow: 0 0 0 2px rgba(92, 184, 92, 0.2);
+}
+
+.form-group input[type="checkbox"],
+.form-group input[type="radio"] {
+  width: auto;
+  margin-right: 6px;
+  vertical-align: middle;
 }
 
 .form-group small {
