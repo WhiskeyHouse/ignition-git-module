@@ -166,6 +166,10 @@ public class GitTagManager {
                 continue;
             }
             String providerName = FilenameUtils.removeExtension(file.getName());
+            if (TagExportConfig.SYSTEM_PROVIDER_NAME.equals(providerName)) {
+                logger.debug("Skipping legacy import for built-in System provider.");
+                continue;
+            }
             TagProvider tagProvider = gatewayTagManager.getTagProvider(providerName);
             if (tagProvider != null) {
                 try {
@@ -192,6 +196,10 @@ public class GitTagManager {
         try (DirectoryStream<Path> providerDirs = Files.newDirectoryStream(tagsDir, Files::isDirectory)) {
             for (Path providerDir : providerDirs) {
                 String providerName = providerDir.getFileName().toString();
+                if (TagExportConfig.SYSTEM_PROVIDER_NAME.equals(providerName)) {
+                    logger.debug("Skipping individual-file import for built-in System provider.");
+                    continue;
+                }
                 TagProvider tagProvider = gatewayTagManager.getTagProvider(providerName);
                 if (tagProvider == null) {
                     logger.warn("Tag provider '" + providerName + "' not found, skipping individual-file import.");

@@ -12,6 +12,7 @@ import com.inductiveautomation.ignition.common.tags.config.TagGroupMode;
 import com.inductiveautomation.ignition.common.tags.model.TagProvider;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
 import com.inductiveautomation.ignition.gateway.tags.model.GatewayTagManager;
+import com.axone_io.ignition.git.TagExportConfig;
 
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
@@ -68,6 +69,12 @@ public class GitTagGroupManager {
 
         for (TagProvider tagProvider : gatewayTagManager.getTagProviders()) {
             String providerName = tagProvider.getName();
+
+            if (TagExportConfig.SYSTEM_PROVIDER_NAME.equals(providerName)) {
+                logger.debug("Skipping tag group export for built-in System provider.");
+                continue;
+            }
+
             Path providerDir = tagsDir.resolve(providerName);
 
             try {
