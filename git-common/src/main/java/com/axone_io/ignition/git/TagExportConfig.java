@@ -15,6 +15,13 @@ import java.util.List;
 public class TagExportConfig implements Serializable {
     private static final long serialVersionUID = 1L;
 
+    /**
+     * Name of Ignition's built-in tag provider that holds runtime/diagnostic tags
+     * (gateway uptime, performance metrics, etc.). These are environment-specific
+     * and must never be tracked in git.
+     */
+    public static final String SYSTEM_PROVIDER_NAME = "System";
+
     /** Tag providers to include in export. Empty list means all providers. */
     private List<String> includedProviders;
 
@@ -71,8 +78,13 @@ public class TagExportConfig implements Serializable {
     /**
      * Returns {@code true} if the given provider name should be included in export,
      * based on the {@link #includedProviders} list. An empty list means all providers.
+     * The Ignition built-in {@link #SYSTEM_PROVIDER_NAME System} provider is always
+     * excluded regardless of configuration.
      */
     public boolean isProviderIncluded(String providerName) {
+        if (SYSTEM_PROVIDER_NAME.equals(providerName)) {
+            return false;
+        }
         return includedProviders == null || includedProviders.isEmpty()
                 || includedProviders.contains(providerName);
     }
