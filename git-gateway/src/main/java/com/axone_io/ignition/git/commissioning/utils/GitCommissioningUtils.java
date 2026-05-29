@@ -28,6 +28,8 @@ import java.lang.reflect.Field;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -36,6 +38,34 @@ import static com.axone_io.ignition.git.managers.GitManager.*;
 
 public class GitCommissioningUtils {
     private final static LoggerEx logger = LoggerEx.newBuilder().build(GitCommissioningUtils.class);
+
+    /**
+     * Single source of truth for git.yaml key -> ProjectConfig field-name mapping.
+     * Any new YAML key must be added here AND backed by a real field on ProjectConfig.
+     * The companion unit test verifies every value resolves to a declared field.
+     */
+    public static final Map<String, String> YAML_KEY_TO_FIELD;
+    static {
+        Map<String, String> m = new LinkedHashMap<>();
+        m.put("repo_uri", "repo_uri");
+        m.put("repo_branch", "repo_branch");
+        m.put("ignition_projectName", "ignition_projectName");
+        m.put("ignition_userName", "ignition_userName");
+        m.put("ignition_inheritable", "ignition_inheritable");
+        m.put("ignition_parentName", "ignition_parentName");
+        m.put("user_name", "user_name");
+        m.put("user_email", "user_email");
+        m.put("user_password", "user_password");
+        m.put("commissioning_importThemes", "commissioning_importThemes");
+        m.put("commissioning_importTags", "commissioning_importTags");
+        m.put("commissioning_importImages", "commissioning_importImages");
+        m.put("commissioning_enforceBranch", "commissioning_enforceBranch");
+        m.put("production_mode", "production_mode");
+        m.put("production_branch", "production_branch");
+        m.put("production_tagPattern", "production_tagPattern");
+        m.put("initDefaultBranch", "initDefaultBranch");
+        YAML_KEY_TO_FIELD = Collections.unmodifiableMap(m);
+    }
 
     public static GitCommissioningConfig config;
 
@@ -177,36 +207,48 @@ public class GitCommissioningUtils {
             String remoteName = GitManager.getRemoteName(git);
             String currentBranch = git.getRepository().getBranch();
             String configuredBranch = config.getRepoBranch();
+            boolean enforceBranch = config.isEnforceBranch();
+            boolean needsBranchSwitch = enforceBranch && !currentBranch.equals(configuredBranch);
 
-            // 1. Stash uncommitted changes
-            stashIfDirty(git, projectName);
-
-            // 2. Fetch from remote
+            // 1. Fetch from remote (non-destructive: only updates remote-tracking refs)
             logger.info("Fetching from remote '" + remoteName + "' for project '" + projectName + "'...");
             FetchCommand fetch = git.fetch().setRemote(remoteName);
             setAuthentication(fetch, projectName, config.getIgnitionUserName());
             fetch.call();
 
-            // 3. Switch branch if needed (and enforceBranch is enabled)
-            if (config.isEnforceBranch()) {
-                if (!currentBranch.equals(configuredBranch)) {
-                    logger.info("Switching project '" + projectName + "' from branch '" + currentBranch + "' to configured branch '" + configuredBranch + "'.");
-                    boolean localBranchExists = git.branchList().call().stream()
-                            .anyMatch(ref -> ref.getName().equals("refs/heads/" + configuredBranch));
-
-                    CheckoutCommand checkout = git.checkout().setName(configuredBranch);
-                    if (!localBranchExists) {
-                        checkout.setCreateBranch(true)
-                                .setUpstreamMode(CreateBranchCommand.SetupUpstreamMode.TRACK)
-                                .setStartPoint(remoteName + "/" + configuredBranch);
-                    }
-                    checkout.call();
-                }
-            } else {
-                logger.info("Skipping branch switch for project '" + projectName + "' because commissioning_enforceBranch is false. Staying on branch '" + currentBranch + "'.");
+            // 2. If enforceBranch is disabled, do NOT touch the working tree. Leave the
+            //    developer on their current branch with any uncommitted changes intact.
+            //    See TEC-3635: commissioning was force-switching developers off feature
+            //    branches and auto-stashing on every gateway restart.
+            if (!enforceBranch) {
+                logger.info("Skipping branch switch and stash for project '" + projectName
+                        + "' because commissioning_enforceBranch is false. Staying on branch '"
+                        + currentBranch + "' with working tree untouched.");
+                importProjectResources(config);
+                logger.info("Sync complete for project '" + projectName + "'.");
+                return;
             }
 
-            // 4. Pull latest
+            // 3. Stash uncommitted changes only when we are about to mutate the working tree
+            //    (i.e. switch branches). Avoids the noisy stash-pile reported in TEC-3635.
+            if (needsBranchSwitch) {
+                stashIfDirty(git, projectName);
+
+                logger.info("Switching project '" + projectName + "' from branch '" + currentBranch
+                        + "' to configured branch '" + configuredBranch + "'.");
+                boolean localBranchExists = git.branchList().call().stream()
+                        .anyMatch(ref -> ref.getName().equals("refs/heads/" + configuredBranch));
+
+                CheckoutCommand checkout = git.checkout().setName(configuredBranch);
+                if (!localBranchExists) {
+                    checkout.setCreateBranch(true)
+                            .setUpstreamMode(CreateBranchCommand.SetupUpstreamMode.TRACK)
+                            .setStartPoint(remoteName + "/" + configuredBranch);
+                }
+                checkout.call();
+            }
+
+            // 4. Pull latest on the (now) configured branch.
             String activeBranch = git.getRepository().getBranch();
             logger.info("Pulling latest changes for project '" + projectName + "' on branch '" + activeBranch + "'...");
             PullCommand pull = git.pull().setRemote(remoteName).setRemoteBranchName(activeBranch);
@@ -315,8 +357,15 @@ public class GitCommissioningUtils {
                                     logger.warn("Cannot set null value to primitive field: " + fieldName);
                                 }
                             }
-                        } catch (NoSuchFieldException | IllegalAccessException e) {
-                            logger.error("Error occurred in fetching YAML Git Config data ", e);
+                        } catch (NoSuchFieldException | IllegalAccessException | IllegalArgumentException e) {
+                            // Fail loudly: a misconfigured/unmapped YAML key would otherwise be
+                            // silently ignored and the project would run with stale defaults
+                            // (e.g. commissioning_enforceBranch never applied -> surprise branch
+                            // switches and auto-stashing on every gateway restart).
+                            logger.error("Error occurred in fetching YAML Git Config data for key '"
+                                    + entry.getKey() + "'", e);
+                            throw new RuntimeException(
+                                    "Invalid git.yaml: failed to apply key '" + entry.getKey() + "'", e);
                         }
 
                     }
@@ -349,35 +398,14 @@ public class GitCommissioningUtils {
         }
     }
 
-    private static String yamlKeyToFieldName(String yamlKey) {
-        // If the YAML key exactly matches the field name, just return it.
-        // This is a shortcut for cases where no conversion is necessary.
-        // Remove this line if all keys need conversion.
-        if (yamlKey.equals("repo_uri") || yamlKey.equals("repo_branch") ||
-                yamlKey.equals("ignition_projectName") || yamlKey.equals("ignition_userName") ||
-                yamlKey.equals("ignition_inheritable") || yamlKey.equals("ignition_parentName") ||
-                yamlKey.equals("user_name") || yamlKey.equals("user_email") ||
-                yamlKey.equals("user_password") || yamlKey.equals("commissioning_importThemes") ||
-                yamlKey.equals("commissioning_importTags") || yamlKey.equals("commissioning_importImages") ||
-                yamlKey.equals("commissioning_enforceBranch") ||
-                yamlKey.equals("production_mode") || yamlKey.equals("production_branch") ||
-                yamlKey.equals("production_tagPattern")) {
-            return yamlKey; // Your field names already match the YAML keys
+    public static String yamlKeyToFieldName(String yamlKey) {
+        String mapped = YAML_KEY_TO_FIELD.get(yamlKey);
+        if (mapped != null) {
+            return mapped;
         }
-
-        // Split the string at each underscore
-        String[] parts = yamlKey.split("_");
-        StringBuilder fieldName = new StringBuilder(parts[0]); // Keep the first part as is
-
-        // Convert the first letter of each subsequent part to uppercase
-        for (int i = 1; i < parts.length; i++) {
-            // Check if part is not empty to avoid StringIndexOutOfBoundsException
-            if (!parts[i].isEmpty()) {
-                fieldName.append(parts[i].substring(0, 1).toUpperCase()).append(parts[i].substring(1));
-            }
-        }
-
-        return fieldName.toString();
+        throw new IllegalArgumentException(
+                "Unknown git.yaml key '" + yamlKey + "'. "
+                        + "Add it to GitCommissioningUtils.YAML_KEY_TO_FIELD and ensure a matching field exists on ProjectConfig.");
     }
 }
 
