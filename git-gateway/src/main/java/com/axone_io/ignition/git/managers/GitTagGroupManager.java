@@ -168,6 +168,10 @@ public class GitTagGroupManager {
         try (DirectoryStream<Path> providerDirs = Files.newDirectoryStream(tagsDir, Files::isDirectory)) {
             for (Path providerDir : providerDirs) {
                 String providerName = providerDir.getFileName().toString();
+                // Skip hidden/dot dirs (.omc, .claude, .git, etc.) that may sit alongside provider dirs.
+                if (providerName.startsWith(".")) {
+                    continue;
+                }
                 Path groupsFile = providerDir.resolve(TAG_GROUPS_FILENAME);
 
                 if (!Files.exists(groupsFile)) {
