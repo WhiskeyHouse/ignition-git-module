@@ -73,6 +73,19 @@ public class GitTagManager {
     private static final String FS_RESERVED_CHARS = "<>:\"/\\|?*";
 
     /**
+     * Returns {@code true} for filesystem entries whose names start with {@code "."} — agent
+     * state directories like {@code .omc}, {@code .claude}, {@code .cursor}, VCS metadata
+     * ({@code .git}), and the internal config files ({@code .tag-config.json},
+     * {@code .tag-groups.json}). Ignition rejects tag names starting with {@code "."} as
+     * invalid ({@code Error_Configuration("The name '.omc' is not a valid tag name")}), so
+     * filtering them out during import prevents a single stray dot-folder in the working tree
+     * from derailing the rest of the provider's tag import.
+     */
+    static boolean isHiddenEntry(String name) {
+        return name != null && name.startsWith(".");
+    }
+
+    /**
      * Encodes a tag name so it is safe to use as a filesystem path segment on any OS.
      * Reserved characters, control characters, and the percent sign itself are
      * replaced with {@code %XX} hex escapes. Names with only safe characters are
@@ -162,7 +175,7 @@ public class GitTagManager {
         if (files == null) return;
 
         for (File file : files) {
-            if (!file.isFile() || !file.getName().endsWith(".json") || file.getName().equals(TAG_CONFIG_FILENAME)) {
+            if (!file.isFile() || !file.getName().endsWith(".json") || isHiddenEntry(file.getName())) {
                 continue;
             }
             String providerName = FilenameUtils.removeExtension(file.getName());
@@ -196,6 +209,10 @@ public class GitTagManager {
         try (DirectoryStream<Path> providerDirs = Files.newDirectoryStream(tagsDir, Files::isDirectory)) {
             for (Path providerDir : providerDirs) {
                 String providerName = providerDir.getFileName().toString();
+                if (isHiddenEntry(providerName)) {
+                    logger.debug("Skipping hidden/dot directory under tags/: " + providerName);
+                    continue;
+                }
                 if (TagExportConfig.SYSTEM_PROVIDER_NAME.equals(providerName)) {
                     logger.debug("Skipping individual-file import for built-in System provider.");
                     continue;
@@ -380,6 +397,7 @@ public class GitTagManager {
         if (files == null) return;
 
         for (File file : files) {
+            if (isHiddenEntry(file.getName())) continue;
             if (file.isDirectory()) {
                 String newPrefix = pathPrefix.isEmpty() ? file.getName() : pathPrefix + "/" + file.getName();
                 collectUdtFiles(file.toPath(), udtArray, newPrefix);
@@ -410,7 +428,7 @@ public class GitTagManager {
      * @param skipTypesDir  if {@code true}, skips the {@code _types_/} directory
      * @return a JsonObject where keys are tag/folder names and values are their JSON definitions
      */
-    private static JsonObject readTagsFromDirectory(Path dir, boolean skipTypesDir) {
+    static JsonObject readTagsFromDirectory(Path dir, boolean skipTypesDir) {
         JsonObject tags = new JsonObject();
         File[] entries = dir.toFile().listFiles();
         if (entries == null) return tags;
@@ -418,10 +436,11 @@ public class GitTagManager {
         for (File entry : entries) {
             String fsName = entry.getName();
 
-            // Skip config and tag-groups files (tag groups are imported separately).
-            // These constants contain only safe characters, so compare against the raw filesystem name.
-            if (fsName.equals(TAG_CONFIG_FILENAME)) continue;
-            if (fsName.equals(GitTagGroupManager.TAG_GROUPS_FILENAME)) continue;
+            // Skip hidden/dot entries — covers .tag-config.json, .tag-groups.json, and any
+            // agent-state directories like .omc/ or .claude/ that may be present in the
+            // working tree. Ignition rejects tag names starting with "." as invalid, so a
+            // single stray dot-folder would otherwise abort the entire provider import.
+            if (isHiddenEntry(fsName)) continue;
 
             // Optionally skip _types_ directory (handled separately for UDT ordering)
             if (skipTypesDir && fsName.equals(TYPES_DIR_NAME)) continue;
