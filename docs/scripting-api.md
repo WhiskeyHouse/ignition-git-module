@@ -29,7 +29,7 @@ Arguments are positional (keyword-style calls are not supported).
 | Parameter | Type | Description |
 |---|---|---|
 | `projectName` | str | Ignition project whose repo tags to import |
-| `collisionPolicy` | str (optional) | `"a"` abort, `"m"` merge, `"o"` overwrite. Defaults to the repo's `tag_config` policy |
+| `collisionPolicy` | str (optional) | `"a"` abort, `"m"` merge (overwrites on collision), `"o"` overwrite. Defaults to the repo's `tag_config` policy |
 
 Returns `True` on completion.
 
