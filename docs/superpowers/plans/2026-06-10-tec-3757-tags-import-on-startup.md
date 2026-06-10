@@ -549,7 +549,7 @@ This supports multi-project import with project inheritance. See the [Docker exa
 
 Insert BETWEEN the closing ``` of the yaml example and that paragraph:
 
-```markdown
+````markdown
 ### Automatic tag re-import on restart
 
 Ignition stores tags in the gateway's internal database, so a gateway restart
@@ -574,7 +574,7 @@ startup.
 Unlike `commissioning_importTags` (which imports tags as part of the full
 commissioning clone/sync and mutates the working tree), `tags_importOnStartup`
 imports **only tags**, from whatever is currently on disk.
-```
+````
 
 - [ ] **Step 2: Update CLAUDE.md**
 

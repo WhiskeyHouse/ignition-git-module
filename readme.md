@@ -198,7 +198,7 @@ startup.
 > **Warning:** Tag providers are gateway-wide and imports are last-writer-wins.
 > If multiple projects track the same provider, enable `tags_importOnStartup`
 > only on the authoritative project (same guidance as `commissioning_importTags`).
-
+>
 > **Deployment order matters:** older module versions reject unknown `git.yaml`
 > keys — on a gateway still running a pre-`tags_importOnStartup` module, a
 > `git.yaml` containing this key will fail commissioning for that project
