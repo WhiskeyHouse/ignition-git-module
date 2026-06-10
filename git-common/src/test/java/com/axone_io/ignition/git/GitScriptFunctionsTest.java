@@ -125,6 +125,16 @@ public class GitScriptFunctionsTest {
     }
 
     @Test
+    public void nullSupplier_failsFastAtConstruction() {
+        try {
+            new GitScriptFunctions(null);
+            fail("expected NullPointerException");
+        } catch (NullPointerException expected) {
+            assertTrue(expected.getMessage().contains("delegateSupplier"));
+        }
+    }
+
+    @Test
     public void delegateResolvedPerCall_notCachedAtConstruction() throws Exception {
         // Simulates Designer ordering: initializeScriptManager runs before startup()
         // populates the RPC reference. The supplier starts null and is set later.

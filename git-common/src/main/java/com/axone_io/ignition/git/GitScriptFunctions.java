@@ -5,6 +5,7 @@ import com.inductiveautomation.ignition.common.script.hints.JythonElement;
 import com.inductiveautomation.ignition.common.script.hints.ScriptArg;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Supplier;
 
 /**
@@ -34,7 +35,7 @@ public class GitScriptFunctions {
     private final Supplier<GitScriptInterface> delegateSupplier;
 
     public GitScriptFunctions(Supplier<GitScriptInterface> delegateSupplier) {
-        this.delegateSupplier = delegateSupplier;
+        this.delegateSupplier = Objects.requireNonNull(delegateSupplier, "delegateSupplier is required");
     }
 
     private GitScriptInterface delegate() {

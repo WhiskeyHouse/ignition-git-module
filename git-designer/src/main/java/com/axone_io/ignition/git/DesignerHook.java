@@ -35,7 +35,8 @@ import java.util.List;
 public class DesignerHook extends AbstractDesignerModuleHook {
     private static final Logger logger = LoggerFactory.getLogger(DesignerHook.class);
 
-    public static GitScriptInterface rpc;
+    // volatile: written in startup(), read from script threads (system.git supplier) and the EDT
+    public static volatile GitScriptInterface rpc;
     public static List<ChangeOperation> changes = new ArrayList<>();
     public static DesignerContext context;
     public static String projectName;
