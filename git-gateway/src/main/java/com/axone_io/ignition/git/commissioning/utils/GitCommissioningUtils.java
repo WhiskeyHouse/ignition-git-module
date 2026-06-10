@@ -399,6 +399,25 @@ public class GitCommissioningUtils {
         }
     }
 
+    /**
+     * Returns the names of projects whose git.yaml entry sets tags_importOnStartup: true.
+     * Pure function so the filtering is unit-testable without a gateway.
+     */
+    public static List<String> projectsWithTagImportOnStartup(ProjectConfigs projectConfigs) {
+        List<String> names = new ArrayList<>();
+        if (projectConfigs == null || projectConfigs.getProjects() == null) {
+            return names;
+        }
+        for (ProjectConfig pc : projectConfigs.getProjects()) {
+            if (Boolean.TRUE.equals(pc.getTags_importOnStartup())
+                    && pc.getIgnition_projectName() != null
+                    && !pc.getIgnition_projectName().trim().isEmpty()) {
+                names.add(pc.getIgnition_projectName());
+            }
+        }
+        return names;
+    }
+
     public static String yamlKeyToFieldName(String yamlKey) {
         String mapped = YAML_KEY_TO_FIELD.get(yamlKey);
         if (mapped != null) {

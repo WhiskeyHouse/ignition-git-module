@@ -4,6 +4,7 @@ import com.axone_io.ignition.git.commissioning.utils.GitCommissioningUtils;
 import org.junit.Test;
 
 import java.lang.reflect.Field;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
@@ -52,5 +53,37 @@ public class GitCommissioningUtilsTest {
         } catch (IllegalArgumentException expected) {
             // ok: misconfigured keys must surface, not be silently dropped
         }
+    }
+
+    @Test
+    public void projectsWithTagImportOnStartup_filtersCorrectly() {
+        ProjectConfigs configs = new ProjectConfigs();
+
+        ProjectConfig enabled = new ProjectConfig();
+        enabled.setIgnition_projectName("ProjA");
+        enabled.setTags_importOnStartup(Boolean.TRUE);
+        configs.addProject(enabled);
+
+        ProjectConfig disabled = new ProjectConfig();
+        disabled.setIgnition_projectName("ProjB");
+        disabled.setTags_importOnStartup(Boolean.FALSE);
+        configs.addProject(disabled);
+
+        ProjectConfig unset = new ProjectConfig();
+        unset.setIgnition_projectName("ProjC");
+        configs.addProject(unset);
+
+        ProjectConfig noName = new ProjectConfig();
+        noName.setTags_importOnStartup(Boolean.TRUE);
+        configs.addProject(noName);
+
+        List<String> result = GitCommissioningUtils.projectsWithTagImportOnStartup(configs);
+        assertEquals(List.of("ProjA"), result);
+    }
+
+    @Test
+    public void projectsWithTagImportOnStartup_emptyAndNullSafe() {
+        assertEquals(List.of(), GitCommissioningUtils.projectsWithTagImportOnStartup(new ProjectConfigs()));
+        assertEquals(List.of(), GitCommissioningUtils.projectsWithTagImportOnStartup(null));
     }
 }
