@@ -149,9 +149,10 @@ git merge --abort  # If in merge state
 Production mode protects production gateways from accidental Git operations. When enabled:
 
 - **Pull** requires a safety checklist (4 checkboxes) + validates repo state, branch, and tags
-- **Push** warns when targeting the production branch
+- **Saving** shows the safety checklist (the save is what changes the gateway), then auto-opens the commit dialog
+- **Commits** auto-push to remote; on the production branch they trigger the automated **hotfix workflow** (branch → commit → push → create PR → merge locally → cleanup)
+- **Push** has no Designer-side warning (outbound only; the gateway still blocks pushes from unsafe repo states)
 - **Branch switching** is blocked entirely
-- **Commits** on the production branch trigger the automated **hotfix workflow** (branch → commit → push → create PR → merge locally → cleanup)
 - **PRODUCTION** badge shown in Designer status bar
 
 Configured via `git.yaml`:

@@ -113,16 +113,19 @@ flowchart TD
     VALIDATE -->|All pass| EXEC_PULL[Execute pull]
     VALIDATE -->|Any fail| BLOCK_VALIDATION[BLOCKED<br/>with reason]
 
-    TYPE -->|Push| PROD_CHECK_PUSH{Production mode?}
-    PROD_CHECK_PUSH -->|No| NORMAL_PUSH[Normal push]
-    PROD_CHECK_PUSH -->|Yes| PUSH_TARGET{Pushing to<br/>production branch?}
-    PUSH_TARGET -->|No| EXEC_PUSH[Execute push]
-    PUSH_TARGET -->|Yes| PUSH_WARN[Warning + confirmation<br/>required]
-    PUSH_WARN --> EXEC_PUSH
+    TYPE -->|Push| EXEC_PUSH[Execute push<br/>no Designer warning -- push is outbound;<br/>gateway still blocks unsafe repo states]
+
+    TYPE -->|Save Ctrl+S| PROD_CHECK_SAVE{Production mode?}
+    PROD_CHECK_SAVE -->|No| NORMAL_SAVE[Normal save]
+    PROD_CHECK_SAVE -->|Yes| SAVE_WARN[ProductionModePopup<br/>4-item safety checklist]
+    SAVE_WARN --> COMMIT_FLOW[Commit dialog auto-opens<br/>hotfix workflow on production branch]
 
     TYPE -->|Commit| PROD_CHECK_COMMIT{Production mode +<br/>on production branch?}
     PROD_CHECK_COMMIT -->|No| NORMAL_COMMIT[Normal commit]
     PROD_CHECK_COMMIT -->|Yes| HOTFIX[Hotfix Workflow]
+    NORMAL_COMMIT --> AUTO_PUSH{Production mode?}
+    AUTO_PUSH -->|Yes| EXEC_PUSH
+    AUTO_PUSH -->|No| COMMIT_DONE[Done]
 
     TYPE -->|Branch Switch| PROD_CHECK_BRANCH{Production mode?}
     PROD_CHECK_BRANCH -->|No| NORMAL_BRANCH[Normal branch switch]
@@ -132,7 +135,7 @@ flowchart TD
     style BLOCK_VALIDATION fill:#FFCDD2
     style BLOCK_BRANCH fill:#FFCDD2
     style HOTFIX fill:#C8E6C9
-    style PUSH_WARN fill:#FFF9C4
+    style SAVE_WARN fill:#FFF9C4
 ```
 
 ### Repository Safety Checks
@@ -183,8 +186,8 @@ sequenceDiagram
     participant GH as GitHub
 
     E->>D: Makes fix, saves (Ctrl+S)
-    D->>E: "Commit changes?" prompt
-    E->>D: Clicks "Yes"
+    D->>E: Production warning (safety checklist)
+    E->>D: Checks all items, clicks "Proceed with Caution"
 
     D->>G: getProductionModeConfig()
     G-->>D: config (productionMode=true, branch=main)
@@ -228,8 +231,8 @@ sequenceDiagram
 
 1. **Engineer makes a fix** in the Ignition Designer (edits a script, modifies a view, etc.)
 2. **Saves the project** (Ctrl+S)
-3. **Module prompts:** "You've saved changes on a production gateway. Would you like to commit and track these changes?"
-4. **Engineer clicks Yes** -- the module detects the hotfix scenario (production mode + on production branch)
+3. **Module shows the production warning** -- the 4-item safety checklist (`ProductionModePopup`), since the save is what changed the gateway
+4. **Engineer confirms** -- the commit dialog opens automatically and the module detects the hotfix scenario (production mode + on production branch)
 5. **Hotfix Commit Dialog appears** -- the engineer provides:
    - A short **hotfix description** (used in branch name and PR title)
    - A **commit message** explaining the fix
