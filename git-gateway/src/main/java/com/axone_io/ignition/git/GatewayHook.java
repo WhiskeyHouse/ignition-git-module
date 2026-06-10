@@ -110,6 +110,7 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     @Override
     public void startup(LicenseState licenseState) {
         GitCommissioningUtils.loadConfiguration();
+        GitCommissioningUtils.startTagImportOnStartup();
 
         logger.info("startup()");
     }

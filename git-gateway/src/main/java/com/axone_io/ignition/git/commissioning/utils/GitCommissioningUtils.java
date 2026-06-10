@@ -8,6 +8,7 @@ import com.axone_io.ignition.git.managers.GitManager;
 import com.axone_io.ignition.git.managers.GitProjectManager;
 import com.axone_io.ignition.git.managers.GitTagManager;
 import com.axone_io.ignition.git.managers.GitThemeManager;
+import com.axone_io.ignition.git.managers.StartupTagImporter;
 import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
 import com.axone_io.ignition.git.records.GitReposUsersRecord;
 import com.google.common.eventbus.Subscribe;
@@ -416,6 +417,28 @@ public class GitCommissioningUtils {
             }
         }
         return names;
+    }
+
+    /**
+     * Entry point called from GatewayHook.startup(). Parses git.yaml, finds
+     * projects flagged tags_importOnStartup: true, and spawns the background
+     * importer. Never throws — gateway startup must not fail because of this.
+     */
+    public static void startTagImportOnStartup() {
+        try {
+            Path yamlConfigPath = getDataFolderPath().resolve("git.yaml");
+            if (!yamlConfigPath.toFile().isFile()) {
+                return;
+            }
+            List<String> projects = projectsWithTagImportOnStartup(parseYaml(yamlConfigPath));
+            if (projects.isEmpty()) {
+                return;
+            }
+            logger.info("Scheduling startup tag import for projects: " + projects);
+            StartupTagImporter.start(projects);
+        } catch (Exception e) {
+            logger.error("Failed to schedule startup tag import; continuing gateway startup.", e);
+        }
     }
 
     public static String yamlKeyToFieldName(String yamlKey) {
