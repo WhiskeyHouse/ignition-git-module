@@ -59,5 +59,8 @@ public class ProjectConfig {
     @Getter
     @Setter
     private String production_tagPattern;
+    @Getter
+    @Setter
+    private Boolean tags_importOnStartup;
 
 }

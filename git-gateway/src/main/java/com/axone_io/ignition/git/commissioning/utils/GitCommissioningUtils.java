@@ -63,6 +63,7 @@ public class GitCommissioningUtils {
         m.put("production_mode", "production_mode");
         m.put("production_branch", "production_branch");
         m.put("production_tagPattern", "production_tagPattern");
+        m.put("tags_importOnStartup", "tags_importOnStartup");
         m.put("initDefaultBranch", "initDefaultBranch");
         YAML_KEY_TO_FIELD = Collections.unmodifiableMap(m);
     }

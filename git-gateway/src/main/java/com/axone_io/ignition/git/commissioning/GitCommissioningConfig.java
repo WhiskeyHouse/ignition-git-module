@@ -68,6 +68,9 @@ public class GitCommissioningConfig {
     @Getter
     @Setter
     private String productionTagPattern;
+    @Getter
+    @Setter
+    private boolean importTagsOnStartup = false;
 
     public void loadFromProjectConfig(ProjectConfig projectConfig) {
 
@@ -89,6 +92,7 @@ public class GitCommissioningConfig {
         this.productionMode = Boolean.TRUE.equals(projectConfig.getProduction_mode());
         this.productionBranch = projectConfig.getProduction_branch();
         this.productionTagPattern = projectConfig.getProduction_tagPattern();
+        this.importTagsOnStartup = Boolean.TRUE.equals(projectConfig.getTags_importOnStartup());
     }
 
     public void setSecretFromFilePath(Path filePath, boolean isSSHAuth) throws IOException {

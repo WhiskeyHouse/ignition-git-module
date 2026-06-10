@@ -38,6 +38,13 @@ public class GitCommissioningUtilsTest {
     }
 
     @Test
+    public void tagsImportOnStartupKeyMapsToActualBooleanField() throws NoSuchFieldException {
+        String fieldName = GitCommissioningUtils.yamlKeyToFieldName("tags_importOnStartup");
+        Field field = ProjectConfig.class.getDeclaredField(fieldName);
+        assertEquals(Boolean.class, field.getType());
+    }
+
+    @Test
     public void unknownYamlKeyFailsLoudly() {
         try {
             GitCommissioningUtils.yamlKeyToFieldName("this_key_does_not_exist");
