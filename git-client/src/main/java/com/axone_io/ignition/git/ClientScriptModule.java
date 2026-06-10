@@ -125,6 +125,11 @@ public class ClientScriptModule extends AbstractScriptModule {
     }
 
     @Override
+    protected boolean importTagsImpl(String projectName, String collisionPolicy) throws Exception {
+        return rpc.importTags(projectName, collisionPolicy);
+    }
+
+    @Override
     protected List<String> getGitTrackedProjectNamesImpl() {
         return rpc.getGitTrackedProjectNames();
     }

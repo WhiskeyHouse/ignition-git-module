@@ -920,6 +920,12 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     }
 
     @Override
+    protected boolean importTagsImpl(String projectName, String collisionPolicy) throws Exception {
+        GitTagManager.importTagManager(projectName, collisionPolicy);
+        return true;
+    }
+
+    @Override
     protected List<String> getGitTrackedProjectNamesImpl() {
         List<String> projectNames = new ArrayList<>();
         try {

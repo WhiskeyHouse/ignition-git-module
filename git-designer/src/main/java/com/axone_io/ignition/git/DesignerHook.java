@@ -15,6 +15,7 @@ import com.inductiveautomation.ignition.designer.gui.DesignerToolbar;
 import com.inductiveautomation.ignition.designer.gui.StatusBar;
 import com.inductiveautomation.ignition.designer.model.DesignerContext;
 import com.inductiveautomation.ignition.common.script.ScriptManager;
+import com.inductiveautomation.ignition.common.script.hints.PropertiesFileDocProvider;
 import com.inductiveautomation.ignition.designer.model.AbstractDesignerModuleHook;
 import com.inductiveautomation.ignition.designer.model.SaveContext;
 import com.inductiveautomation.ignition.designer.navtree.model.AbstractNavTreeNode;
@@ -34,7 +35,8 @@ import java.util.List;
 public class DesignerHook extends AbstractDesignerModuleHook {
     private static final Logger logger = LoggerFactory.getLogger(DesignerHook.class);
 
-    public static GitScriptInterface rpc;
+    // volatile: written in startup(), read from script threads (system.git supplier) and the EDT
+    public static volatile GitScriptInterface rpc;
     public static List<ChangeOperation> changes = new ArrayList<>();
     public static DesignerContext context;
     public static String projectName;
@@ -51,11 +53,13 @@ public class DesignerHook extends AbstractDesignerModuleHook {
     public void initializeScriptManager(ScriptManager manager) {
         super.initializeScriptManager(manager);
 
-        /*manager.addScriptModule(
-            "system.git",
-            new ClientScriptModule(),
-            new PropertiesFileDocProvider()
-        );*/
+        // The static rpc field is populated in startup(), which can run AFTER this
+        // method — GitScriptFunctions resolves the supplier lazily on each call.
+        manager.addScriptModule(
+                "system.git",
+                new GitScriptFunctions(() -> rpc),
+                new PropertiesFileDocProvider()
+        );
     }
 
     @Override

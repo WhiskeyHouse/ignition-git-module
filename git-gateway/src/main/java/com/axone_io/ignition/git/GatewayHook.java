@@ -6,6 +6,8 @@ import com.axone_io.ignition.git.records.GitReposUsersRecord;
 import com.inductiveautomation.ignition.common.BundleUtil;
 import com.inductiveautomation.ignition.common.licensing.LicenseState;
 import com.inductiveautomation.ignition.common.rpc.proto.ProtoRpcSerializer;
+import com.inductiveautomation.ignition.common.script.ScriptManager;
+import com.inductiveautomation.ignition.common.script.hints.PropertiesFileDocProvider;
 import com.inductiveautomation.ignition.gateway.dataroutes.RouteGroup;
 import com.inductiveautomation.ignition.gateway.model.AbstractGatewayModuleHook;
 import com.inductiveautomation.ignition.gateway.model.GatewayContext;
@@ -45,6 +47,19 @@ public class GatewayHook extends AbstractGatewayModuleHook {
                 ProtoRpcSerializer.DEFAULT_INSTANCE,
                 scriptModule
         ));
+    }
+
+    @Override
+    public void initializeScriptManager(ScriptManager manager) {
+        super.initializeScriptManager(manager);
+
+        // Curated scripting surface: tag import + read-only status only.
+        // Enables Gateway Event Scripts (Startup/Timer) to call system.git.*.
+        manager.addScriptModule(
+                "system.git",
+                new GitScriptFunctions(() -> scriptModule),
+                new PropertiesFileDocProvider()
+        );
     }
 
     // Removed - using mountRouteHandlers instead for Ignition 8.3
