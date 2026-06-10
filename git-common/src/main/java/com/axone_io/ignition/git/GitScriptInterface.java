@@ -39,6 +39,10 @@ public interface GitScriptInterface {
     // Import resources from repo (without pull)
     boolean importResources(String projectName, boolean importTags, boolean importTheme, boolean importImages, String collisionPolicy) throws Exception;
 
+    // Import only tags from the working tree into gateway tag providers (no pull).
+    // collisionPolicy may be null/empty -> falls back to the repo's tag_config policy.
+    boolean importTags(String projectName, String collisionPolicy) throws Exception;
+
     // Multi-project awareness
     List<String> getGitTrackedProjectNames();
 
