@@ -65,6 +65,7 @@ Scope Legend: **C** = Client (Vision), **D** = Designer, **G** = Gateway
 | `GatewayScriptModule` | git-gateway | Gateway implementation using JGit |
 | `ClientScriptModule` | git-client | Client RPC delegations |
 | `GitActionManager` | git-designer | Designer UI actions and popups |
+| `GitScriptFunctions` | git-common | Curated `system.git.*` scripting facade (tag import + read-only status) |
 | `BranchPopup` | git-designer | Branch switching UI |
 | `DesignerHook` | git-designer | Designer module lifecycle, production config caching |
 | `GatewayHook` | git-gateway | Gateway module lifecycle |
@@ -95,6 +96,7 @@ Scope Legend: **C** = Client (Vision), **D** = Designer, **G** = Gateway
   2. `AbstractScriptModule` (wrapper method)
   3. `GatewayScriptModule` (implementation)
   4. `ClientScriptModule` (RPC delegation)
+- The `GitScriptFunctions` facade (`system.git.*`) MAY use overloads — it is consumed by Jython, never by RPC.
 
 ### Serialization
 
