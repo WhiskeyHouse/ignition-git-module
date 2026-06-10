@@ -25,7 +25,11 @@ public class StartupTagImporter {
     static final long POLL_INTERVAL_MS = 5_000L;
     static final long TIMEOUT_MS = 120_000L;
 
-    /** Spawns the daemon import thread. Returns the thread (for tests/diagnostics). */
+    /**
+     * Spawns the daemon import thread. Returns the thread (for tests/diagnostics).
+     * No dedup across module restarts: a fast disable/enable can briefly leave two
+     * threads alive, which at worst re-imports the same tags (last-writer-wins, benign).
+     */
     public static Thread start(List<String> projectNames) {
         Thread t = new Thread(
                 () -> runImport(

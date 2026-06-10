@@ -199,6 +199,12 @@ startup.
 > If multiple projects track the same provider, enable `tags_importOnStartup`
 > only on the authoritative project (same guidance as `commissioning_importTags`).
 
+> **Deployment order matters:** older module versions reject unknown `git.yaml`
+> keys — on a gateway still running a pre-`tags_importOnStartup` module, a
+> `git.yaml` containing this key will fail commissioning for that project
+> (logged, but the project is not synced). Upgrade the module on **all**
+> gateways sharing the `git.yaml` before adding this key.
+
 Unlike `commissioning_importTags` (which imports tags as part of the full
 commissioning clone/sync and mutates the working tree), `tags_importOnStartup`
 imports **only tags**, from whatever is currently on disk.
