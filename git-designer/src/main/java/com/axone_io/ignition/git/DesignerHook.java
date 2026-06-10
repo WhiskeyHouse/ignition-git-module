@@ -292,16 +292,50 @@ public class DesignerHook extends AbstractDesignerModuleHook {
         // production warning lives (push is outbound and not gated). Proceeding flows straight
         // into the commit dialog \u2014 hotfix workflow on the production branch \u2014 and commits in
         // production mode auto-push, keeping the remote in sync with the gateway.
-        if (cachedProductionConfig != null && cachedProductionConfig.isProductionMode()) {
-            SwingUtilities.invokeLater(() -> {
-                new ProductionModePopup(context.getFrame(), cachedProductionConfig, "Save to Production Gateway") {
-                    @Override
-                    public void onProceed() {
-                        GitActionManager.showCommitWithHotfixDetection(projectName, userName);
-                    }
-                };
-            });
+        ProductionModeConfig config = cachedProductionConfig;
+        if (config != null) {
+            showSaveWarningIfProduction(config);
+            return;
         }
+
+        // The cache is null after invalidation (pull, branch switch, hotfix) until the periodic
+        // refresh fires \u2014 re-fetch now rather than letting a save slip through ungated.
+        SwingWorker<ProductionModeConfig, Void> worker = new SwingWorker<ProductionModeConfig, Void>() {
+            @Override
+            protected ProductionModeConfig doInBackground() throws Exception {
+                return rpc.getProductionModeConfig(projectName);
+            }
+
+            @Override
+            protected void done() {
+                ProductionModeConfig fetched;
+                try {
+                    fetched = get();
+                    cachedProductionConfig = fetched;
+                } catch (Exception e) {
+                    // Can't verify \u2014 treat the gateway as production rather than failing open.
+                    logger.warn("Unable to verify production mode after save; showing warning conservatively", e);
+                    fetched = new ProductionModeConfig(true, null, null);
+                    fetched.setWarningMessage("Unable to verify production mode for this gateway: " + e.getMessage());
+                }
+                showSaveWarningIfProduction(fetched);
+            }
+        };
+        worker.execute();
+    }
+
+    private void showSaveWarningIfProduction(ProductionModeConfig config) {
+        if (config == null || !config.isProductionMode()) {
+            return;
+        }
+        SwingUtilities.invokeLater(() -> {
+            new ProductionModePopup(context.getFrame(), config, "Save to Production Gateway") {
+                @Override
+                public void onProceed() {
+                    GitActionManager.showCommitWithHotfixDetection(projectName, userName);
+                }
+            };
+        });
     }
 
     @Override
