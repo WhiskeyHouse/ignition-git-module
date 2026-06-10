@@ -342,42 +342,14 @@ public class GitActionManager {
         DesignerHook.invalidateProductionConfigCache();
     }
 
-    public static void showPushWithProductionCheck(String projectName, String userName) {
-        SwingWorker<ProductionModeConfig, Void> worker = new SwingWorker<ProductionModeConfig, Void>() {
-            @Override
-            protected ProductionModeConfig doInBackground() throws Exception {
-                return rpc.getProductionModeConfig(projectName);
-            }
-
-            @Override
-            protected void done() {
-                try {
-                    ProductionModeConfig prodConfig = get();
-
-                    if (prodConfig.isProductionMode()) {
-                        logger.info("Production mode is active for project: " + projectName + " — showing push confirmation");
-
-                        new ProductionModePopup(context.getFrame(), prodConfig, "Push to Remote") {
-                            @Override
-                            public void onProceed() {
-                                executePush(projectName, userName);
-                            }
-                        };
-                    } else {
-                        executePush(projectName, userName);
-                    }
-                } catch (Exception e) {
-                    logger.error("Error checking production mode for push", e);
-                    JOptionPane.showMessageDialog(
-                        context.getFrame(),
-                        "Unable to verify production mode for this project. Push was blocked.\n\n" + e.getMessage(),
-                        "Production Mode Check Failed",
-                        JOptionPane.ERROR_MESSAGE
-                    );
-                }
-            }
-        };
-        worker.execute();
+    /**
+     * Push the current branch to remote. Push is outbound and does not modify this gateway,
+     * so there is no Designer-side production warning here — the warning happens at save time
+     * (see DesignerHook.notifyProjectSaveDone), and the gateway still hard-blocks pushes from
+     * unsafe repository states.
+     */
+    public static void pushCurrentBranch(String projectName, String userName) {
+        executePush(projectName, userName);
     }
 
     private static void executePush(String projectName, String userName) {

@@ -16,7 +16,7 @@ import static com.axone_io.ignition.git.DesignerHook.*;
 import static com.axone_io.ignition.git.managers.GitActionManager.showCommitPopup;
 import static com.axone_io.ignition.git.managers.GitActionManager.showCommitWithHotfixDetection;
 import static com.axone_io.ignition.git.managers.GitActionManager.showPullPopup;
-import static com.axone_io.ignition.git.managers.GitActionManager.showPushWithProductionCheck;
+import static com.axone_io.ignition.git.managers.GitActionManager.pushCurrentBranch;
 import static com.axone_io.ignition.git.managers.GitActionManager.showHistoryViewer;
 import static com.axone_io.ignition.git.managers.GitActionManager.showBranchPopup;
 import static com.axone_io.ignition.git.managers.GitActionManager.showConfirmPopup;
@@ -102,7 +102,25 @@ public class GitBaseAction extends BaseAction {
 
         try {
             rpc.commit(projectName, userName, changes.toArray(new String[0]), commitMessage);
-            SwingUtilities.invokeLater(new Thread(() -> showConfirmPopup(message, messageType)));
+
+            // In production mode the remote should always mirror the gateway, so push
+            // immediately instead of leaving it as a separate manual step. Commits on the
+            // production branch never reach here — hotfix detection routes them to the
+            // hotfix pipeline, which pushes on its own.
+            try {
+                if (rpc.getProductionModeConfig(projectName).isProductionMode()) {
+                    rpc.push(projectName, userName);
+                    message += "\n" + BundleUtil.get().getStringLenient(GitActionType.PUSH.baseBundleKey + ".ConfirmMessage");
+                }
+            } catch (Exception pushEx) {
+                logger.error("Auto-push after commit failed", pushEx);
+                message += "\nCommit succeeded, but automatic push failed:\n" + pushEx.getMessage();
+                messageType = JOptionPane.WARNING_MESSAGE;
+            }
+
+            final String finalMessage = message;
+            final int finalMessageType = messageType;
+            SwingUtilities.invokeLater(new Thread(() -> showConfirmPopup(finalMessage, finalMessageType)));
         } catch (Exception ex) {
             ErrorUtil.showError(ex);
         }
@@ -175,7 +193,7 @@ public class GitBaseAction extends BaseAction {
                     break;
                 case PUSH:
                     confirmPopup = Boolean.FALSE;
-                    showPushWithProductionCheck(projectName, userName);
+                    pushCurrentBranch(projectName, userName);
                     break;
                 case COMMIT:
                     confirmPopup = Boolean.FALSE;

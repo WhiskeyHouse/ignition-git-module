@@ -288,19 +288,18 @@ public class DesignerHook extends AbstractDesignerModuleHook {
     public void notifyProjectSaveDone() {
         super.notifyProjectSaveDone();
 
-        // In production mode, prompt the engineer to commit after saving
+        // Saving is the moment the production gateway actually changes, so this is where the
+        // production warning lives (push is outbound and not gated). Proceeding flows straight
+        // into the commit dialog \u2014 hotfix workflow on the production branch \u2014 and commits in
+        // production mode auto-push, keeping the remote in sync with the gateway.
         if (cachedProductionConfig != null && cachedProductionConfig.isProductionMode()) {
             SwingUtilities.invokeLater(() -> {
-                int result = JOptionPane.showConfirmDialog(
-                    context.getFrame(),
-                    "You've saved changes on a production gateway.\nWould you like to commit and track these changes?",
-                    "Production Mode \u2014 Commit Changes?",
-                    JOptionPane.YES_NO_OPTION,
-                    JOptionPane.QUESTION_MESSAGE
-                );
-                if (result == JOptionPane.YES_OPTION) {
-                    GitActionManager.showCommitWithHotfixDetection(projectName, userName);
-                }
+                new ProductionModePopup(context.getFrame(), cachedProductionConfig, "Save to Production Gateway") {
+                    @Override
+                    public void onProceed() {
+                        GitActionManager.showCommitWithHotfixDetection(projectName, userName);
+                    }
+                };
             });
         }
     }
