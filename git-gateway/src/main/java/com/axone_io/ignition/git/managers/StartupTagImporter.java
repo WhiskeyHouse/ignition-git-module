@@ -64,6 +64,10 @@ public class StartupTagImporter {
                 return;
             }
             sleeper.accept(POLL_INTERVAL_MS);
+            if (Thread.currentThread().isInterrupted()) {
+                logger.warn("Startup tag import interrupted; skipping for projects: " + projectNames);
+                return;
+            }
         }
         for (String project : projectNames) {
             try {

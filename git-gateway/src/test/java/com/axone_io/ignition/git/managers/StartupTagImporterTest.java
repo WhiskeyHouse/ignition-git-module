@@ -75,4 +75,25 @@ public class StartupTagImporterTest {
                 3);
         assertEquals(Arrays.asList("A", "C"), imported);
     }
+
+    @Test
+    public void abortsPollLoop_whenThreadInterrupted() {
+        List<String> imported = new ArrayList<>();
+        List<Long> sleeps = new ArrayList<>();
+        try {
+            StartupTagImporter.runImport(
+                    Arrays.asList("A"),
+                    () -> false,
+                    imported::add,
+                    millis -> {
+                        sleeps.add(millis);
+                        Thread.currentThread().interrupt();
+                    },
+                    100);
+            assertTrue(imported.isEmpty());
+            assertEquals(1, sleeps.size()); // aborted on first interrupted sleep, not after 100 burned polls
+        } finally {
+            Thread.interrupted(); // clear the flag so other tests are unaffected
+        }
+    }
 }
