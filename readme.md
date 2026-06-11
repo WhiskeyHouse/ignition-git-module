@@ -178,6 +178,37 @@ The module supports automated project commissioning via Docker Compose. Place a 
   commissioning_importImages: true
 ```
 
+### Automatic tag re-import on restart
+
+Ignition stores tags in the gateway's internal database, so a gateway restart
+restores tags from gateway state — not from the git working tree. To re-sync
+git-tracked tags into the live providers automatically after every restart,
+set the per-project flag:
+
+```yaml
+  tags_importOnStartup: true
+```
+
+When enabled, the module waits for tag providers to come up (polling every 5s,
+giving up after 2 minutes with a logged warning) and then imports that
+project's `tags/` directory from disk — no pull, no git operations, no
+Designer interaction. Failures are logged per project and never block gateway
+startup.
+
+> **Warning:** Tag providers are gateway-wide and imports are last-writer-wins.
+> If multiple projects track the same provider, enable `tags_importOnStartup`
+> only on the authoritative project (same guidance as `commissioning_importTags`).
+>
+> **Deployment order matters:** older module versions reject unknown `git.yaml`
+> keys — on a gateway still running a pre-`tags_importOnStartup` module, a
+> `git.yaml` containing this key will fail commissioning for that project
+> (logged, but the project is not synced). Upgrade the module on **all**
+> gateways sharing the `git.yaml` before adding this key.
+
+Unlike `commissioning_importTags` (which imports tags as part of the full
+commissioning clone/sync and mutates the working tree), `tags_importOnStartup`
+imports **only tags**, from whatever is currently on disk.
+
 This supports multi-project import with project inheritance. See the [Docker example](docker/) in this repo for a working setup.
 
 ## Release Pipeline

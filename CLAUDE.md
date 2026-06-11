@@ -71,6 +71,7 @@ Scope Legend: **C** = Client (Vision), **D** = Designer, **G** = Gateway
 | `GatewayHook` | git-gateway | Gateway module lifecycle |
 | `ProductionModeManager` | git-gateway | Production mode validation (pull/push/hotfix branch checks) |
 | `HotfixManager` | git-gateway | Hotfix pipeline orchestrator (8-step automated workflow) |
+| `StartupTagImporter` | git-gateway | Background tag re-import on gateway startup (`tags_importOnStartup`) |
 | `GitHubApiManager` | git-gateway | GitHub REST API client for PR creation |
 | `ProductionModePopup` | git-designer | Safety checklist dialog for production operations |
 | `HotfixCommitDialog` | git-designer | Hotfix commit dialog (description, message, changes) |

@@ -8,6 +8,7 @@ import com.axone_io.ignition.git.managers.GitManager;
 import com.axone_io.ignition.git.managers.GitProjectManager;
 import com.axone_io.ignition.git.managers.GitTagManager;
 import com.axone_io.ignition.git.managers.GitThemeManager;
+import com.axone_io.ignition.git.managers.StartupTagImporter;
 import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
 import com.axone_io.ignition.git.records.GitReposUsersRecord;
 import com.google.common.eventbus.Subscribe;
@@ -63,6 +64,7 @@ public class GitCommissioningUtils {
         m.put("production_mode", "production_mode");
         m.put("production_branch", "production_branch");
         m.put("production_tagPattern", "production_tagPattern");
+        m.put("tags_importOnStartup", "tags_importOnStartup");
         m.put("initDefaultBranch", "initDefaultBranch");
         YAML_KEY_TO_FIELD = Collections.unmodifiableMap(m);
     }
@@ -395,6 +397,47 @@ public class GitCommissioningUtils {
         String secretFilePath = System.getenv("GATEWAY_GIT_USER_SECRET_FILE");
         if (secretFilePath != null) {
             config.setSecretFromFilePath(Paths.get(secretFilePath), isSSHAuth);
+        }
+    }
+
+    /**
+     * Returns the names of projects whose git.yaml entry sets tags_importOnStartup: true.
+     * Pure function so the filtering is unit-testable without a gateway.
+     */
+    public static List<String> projectsWithTagImportOnStartup(ProjectConfigs projectConfigs) {
+        List<String> names = new ArrayList<>();
+        if (projectConfigs == null || projectConfigs.getProjects() == null) {
+            return names;
+        }
+        for (ProjectConfig pc : projectConfigs.getProjects()) {
+            if (Boolean.TRUE.equals(pc.getTags_importOnStartup())
+                    && pc.getIgnition_projectName() != null
+                    && !pc.getIgnition_projectName().trim().isEmpty()) {
+                names.add(pc.getIgnition_projectName());
+            }
+        }
+        return names;
+    }
+
+    /**
+     * Entry point called from GatewayHook.startup(). Parses git.yaml, finds
+     * projects flagged tags_importOnStartup: true, and spawns the background
+     * importer. Never throws — gateway startup must not fail because of this.
+     */
+    public static void startTagImportOnStartup() {
+        try {
+            Path yamlConfigPath = getDataFolderPath().resolve("git.yaml");
+            if (!yamlConfigPath.toFile().isFile()) {
+                return;
+            }
+            List<String> projects = projectsWithTagImportOnStartup(parseYaml(yamlConfigPath));
+            if (projects.isEmpty()) {
+                return;
+            }
+            logger.info("Scheduling startup tag import for projects: " + projects);
+            StartupTagImporter.start(projects);
+        } catch (Exception e) {
+            logger.error("Failed to schedule startup tag import; continuing gateway startup.", e);
         }
     }
 
