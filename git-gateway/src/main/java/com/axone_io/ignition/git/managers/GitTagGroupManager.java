@@ -95,6 +95,24 @@ public class GitTagGroupManager {
      * content is written when the fetch succeeded (non-{@code null}); otherwise the
      * previously-snapshotted content is restored. Providers with neither are skipped.
      */
+    /**
+     * Returns the subset of {@code byProvider} whose provider names pass
+     * {@link TagExportConfig#isProviderIncluded(String)} — i.e. the same include/System filter the
+     * tag-writing loop applies. Ensures group files are never written for excluded providers.
+     */
+    static Map<String, String> filterIncludedProviders(Map<String, String> byProvider, TagExportConfig config) {
+        Map<String, String> result = new HashMap<>();
+        if (byProvider == null) {
+            return result;
+        }
+        for (Map.Entry<String, String> entry : byProvider.entrySet()) {
+            if (config != null && config.isProviderIncluded(entry.getKey())) {
+                result.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return result;
+    }
+
     static void writeGroupFiles(Path tagsDir, Map<String, String> freshByProvider,
                                 Map<String, String> preservedByProvider) {
         Map<String, String> fresh = freshByProvider == null ? new HashMap<>() : freshByProvider;
@@ -210,8 +228,10 @@ public class GitTagGroupManager {
      *
      * @param tagsDir             the {@code tags/} directory to write into
      * @param preservedByProvider group-file contents snapshotted before the tags dir was cleared
+     * @param config              per-project export config; only its included providers are written,
+     *                            matching the filter used by the tag-writing loop
      */
-    public static void exportTagGroups(Path tagsDir, Map<String, String> preservedByProvider) {
+    public static void exportTagGroups(Path tagsDir, Map<String, String> preservedByProvider, TagExportConfig config) {
         GatewayTagManager gatewayTagManager = context.getTagManager();
         Gson gson = new GsonBuilder().setPrettyPrinting().create();
         Map<String, String> freshByProvider = new HashMap<>();
@@ -219,8 +239,10 @@ public class GitTagGroupManager {
         for (TagProvider tagProvider : gatewayTagManager.getTagProviders()) {
             String providerName = tagProvider.getName();
 
-            if (TagExportConfig.SYSTEM_PROVIDER_NAME.equals(providerName)) {
-                logger.debug("Skipping tag group export for built-in System provider.");
+            // Same include/System filter as the tag-writing loop, so excluded providers never get a
+            // .tag-groups.json (which would recreate an empty provider dir).
+            if (config == null || !config.isProviderIncluded(providerName)) {
+                logger.debug("Skipping tag group export for provider '" + providerName + "' (not included / System).");
                 continue;
             }
 
@@ -255,9 +277,9 @@ public class GitTagGroupManager {
             }
         }
 
-        // Never restore a System-provider group file (System is intentionally omitted from tracking).
-        Map<String, String> preserved = new HashMap<>(preservedByProvider == null ? new HashMap<>() : preservedByProvider);
-        preserved.remove(TagExportConfig.SYSTEM_PROVIDER_NAME);
+        // Only restore group files for included providers (this also drops the System provider),
+        // so excluded providers are not resurrected from the snapshot.
+        Map<String, String> preserved = filterIncludedProviders(preservedByProvider, config);
 
         writeGroupFiles(tagsDir, freshByProvider, preserved);
     }

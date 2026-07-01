@@ -91,6 +91,41 @@ public class GitTagGroupManagerTest {
         assertFalse(Files.exists(tagsDir.resolve("Ghost")));
     }
 
+    @Test
+    public void filterIncludedProviders_dropsExcludedAndSystemProviders() {
+        // includedProviders = [WHK01] -> only WHK01 kept; default excluded by config, System always excluded.
+        com.axone_io.ignition.git.TagExportConfig config = new com.axone_io.ignition.git.TagExportConfig(
+                java.util.List.of("WHK01"), new java.util.ArrayList<>(), "o");
+        Map<String, String> in = new HashMap<>();
+        in.put("WHK01", WHK01_JSON);
+        in.put("default", DEFAULT_JSON);
+        in.put("System", DEFAULT_JSON);
+
+        Map<String, String> out = GitTagGroupManager.filterIncludedProviders(in, config);
+
+        assertEquals(1, out.size());
+        assertEquals(WHK01_JSON, out.get("WHK01"));
+        assertFalse(out.containsKey("default"));
+        assertFalse(out.containsKey("System"));
+    }
+
+    @Test
+    public void filterIncludedProviders_emptyIncludeListKeepsAllButSystem() {
+        // Empty includedProviders means "all providers", but System is always excluded.
+        com.axone_io.ignition.git.TagExportConfig config = new com.axone_io.ignition.git.TagExportConfig();
+        Map<String, String> in = new HashMap<>();
+        in.put("WHK01", WHK01_JSON);
+        in.put("default", DEFAULT_JSON);
+        in.put("System", DEFAULT_JSON);
+
+        Map<String, String> out = GitTagGroupManager.filterIncludedProviders(in, config);
+
+        assertEquals(2, out.size());
+        assertTrue(out.containsKey("WHK01"));
+        assertTrue(out.containsKey("default"));
+        assertFalse(out.containsKey("System"));
+    }
+
     private void writeGroupFile(Path tagsDir, String provider, String content) throws Exception {
         Path dir = tagsDir.resolve(provider);
         Files.createDirectories(dir);

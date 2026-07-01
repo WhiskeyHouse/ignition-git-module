@@ -627,9 +627,10 @@ public class GitTagManager {
             // Write the config file (preserves user settings for next import)
             writeTagExportConfig(tagFolderPath, config);
 
-            // Export tag groups (scan classes) for all providers. Passing the pre-clear snapshot
-            // makes this non-destructive: providers whose groups can't be fetched keep their prior file.
-            GitTagGroupManager.exportTagGroups(tagFolderPath, preservedGroups);
+            // Export tag groups (scan classes) for the same included providers as the tag files.
+            // Passing the pre-clear snapshot makes this non-destructive: providers whose groups can't
+            // be fetched keep their prior file.
+            GitTagGroupManager.exportTagGroups(tagFolderPath, preservedGroups, config);
 
         } catch (Exception e) {
             logger.error("Error exporting tags: " + e.toString(), e);
