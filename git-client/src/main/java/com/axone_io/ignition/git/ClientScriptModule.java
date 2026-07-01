@@ -185,4 +185,9 @@ public class ClientScriptModule extends AbstractScriptModule {
     protected HotfixResult getLastHotfixStatusImpl(String projectName) throws Exception {
         return rpc.getLastHotfixStatus(projectName);
     }
+
+    @Override
+    protected String diagnoseTagGroupsImpl() throws Exception {
+        return rpc.diagnoseTagGroups();
+    }
 }

@@ -19,7 +19,10 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 
 import static com.axone_io.ignition.git.GatewayHook.context;
@@ -58,31 +61,200 @@ public class GitTagGroupManager {
 
     static final String TAG_GROUPS_FILENAME = ".tag-groups.json";
 
+    // ========================== NON-DESTRUCTIVE WRITE (fix #1) ==========================
+
+    /**
+     * Reads the existing {@code .tag-groups.json} for every provider under {@code tagsDir}
+     * into an in-memory map keyed by provider name. Must be called <em>before</em> the tags
+     * directory is cleared so a failed fresh fetch can fall back to the prior content.
+     */
+    static Map<String, String> snapshotExistingGroupFiles(Path tagsDir) {
+        Map<String, String> snapshot = new HashMap<>();
+        if (tagsDir == null || !Files.exists(tagsDir)) {
+            return snapshot;
+        }
+        try (DirectoryStream<Path> providerDirs = Files.newDirectoryStream(tagsDir, Files::isDirectory)) {
+            for (Path providerDir : providerDirs) {
+                Path groupsFile = providerDir.resolve(TAG_GROUPS_FILENAME);
+                if (Files.exists(groupsFile)) {
+                    try {
+                        snapshot.put(providerDir.getFileName().toString(), Files.readString(groupsFile));
+                    } catch (IOException e) {
+                        logger.warn("Could not read existing tag groups file for preservation: " + groupsFile, e);
+                    }
+                }
+            }
+        } catch (IOException e) {
+            logger.warn("Could not snapshot existing tag group files under " + tagsDir, e);
+        }
+        return snapshot;
+    }
+
+    /**
+     * Writes group files without ever losing prior data. For each provider, the fresh
+     * content is written when the fetch succeeded (non-{@code null}); otherwise the
+     * previously-snapshotted content is restored. Providers with neither are skipped.
+     */
+    /**
+     * Returns the subset of {@code byProvider} whose provider names pass
+     * {@link TagExportConfig#isProviderIncluded(String)} — i.e. the same include/System filter the
+     * tag-writing loop applies. Ensures group files are never written for excluded providers.
+     */
+    static Map<String, String> filterIncludedProviders(Map<String, String> byProvider, TagExportConfig config) {
+        Map<String, String> result = new HashMap<>();
+        if (byProvider == null) {
+            return result;
+        }
+        for (Map.Entry<String, String> entry : byProvider.entrySet()) {
+            if (config != null && config.isProviderIncluded(entry.getKey())) {
+                result.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return result;
+    }
+
+    static void writeGroupFiles(Path tagsDir, Map<String, String> freshByProvider,
+                                Map<String, String> preservedByProvider) {
+        Map<String, String> fresh = freshByProvider == null ? new HashMap<>() : freshByProvider;
+        Map<String, String> preserved = preservedByProvider == null ? new HashMap<>() : preservedByProvider;
+
+        TreeSet<String> providers = new TreeSet<>();
+        providers.addAll(fresh.keySet());
+        providers.addAll(preserved.keySet());
+
+        for (String provider : providers) {
+            String content = fresh.get(provider);
+            boolean preservedUsed = false;
+            if (content == null) {
+                // No fresh content (fetch failed/empty) — fall back to the prior file so a
+                // transient failure never deletes committed group definitions.
+                content = preserved.get(provider);
+                preservedUsed = content != null;
+            }
+            if (content == null) {
+                continue;
+            }
+            try {
+                Path providerDir = tagsDir.resolve(provider);
+                Files.createDirectories(providerDir);
+                Files.writeString(providerDir.resolve(TAG_GROUPS_FILENAME), content);
+                if (preservedUsed) {
+                    logger.warn("Preserved existing tag groups for provider '" + provider +
+                            "' because the fresh export produced none (fetch failed or returned empty).");
+                }
+            } catch (IOException e) {
+                logger.warn("Error writing tag groups file for provider '" + provider + "'.", e);
+            }
+        }
+    }
+
+    // ========================== DIAGNOSTIC (#2) ==========================
+
+    /**
+     * Diagnostic probe for the "empty tag groups on export" issue (#2). For every tag provider
+     * it calls {@code getTagGroupsAsync()} exactly the way {@link #exportTagGroups} does and
+     * reports, per provider: elapsed time, group count, the group names, or the exception/timeout.
+     *
+     * <p>Runnable live from the Designer/Gateway script console:
+     * {@code print system.git.diagnoseTagGroups()}. The full report is also written to the
+     * gateway log at INFO. This is a temporary diagnostic — remove once #2 is resolved.</p>
+     *
+     * @return a human-readable multi-line report
+     */
+    public static String diagnoseTagGroups() {
+        GatewayTagManager gatewayTagManager = context.getTagManager();
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== Tag Group Diagnostic ===\n");
+
+        List<TagProvider> providers = gatewayTagManager.getTagProviders();
+        sb.append("Providers found: ").append(providers.size()).append("\n");
+
+        for (TagProvider tagProvider : providers) {
+            String providerName = tagProvider.getName();
+            sb.append("\nProvider '").append(providerName).append("'");
+            if (TagExportConfig.SYSTEM_PROVIDER_NAME.equals(providerName)) {
+                sb.append(" [System — skipped by export]");
+            }
+            sb.append(":\n");
+
+            long start = System.currentTimeMillis();
+            try {
+                List<TagGroupConfiguration> groups = tagProvider.getTagGroupsAsync()
+                        .get(30, TimeUnit.SECONDS);
+                long ms = System.currentTimeMillis() - start;
+
+                if (groups == null) {
+                    sb.append("  -> NULL result after ").append(ms).append("ms\n");
+                } else if (groups.isEmpty()) {
+                    sb.append("  -> EMPTY list after ").append(ms).append("ms " +
+                            "(unexpected: built-in Default groups should always be present)\n");
+                } else {
+                    List<String> names = new ArrayList<>();
+                    for (TagGroupConfiguration g : groups) {
+                        names.add(g.getName());
+                    }
+                    sb.append("  -> ").append(groups.size()).append(" group(s) in ")
+                            .append(ms).append("ms: ").append(names).append("\n");
+                }
+            } catch (Exception e) {
+                long ms = System.currentTimeMillis() - start;
+                sb.append("  -> ").append(e.getClass().getSimpleName())
+                        .append(" after ").append(ms).append("ms: ").append(e.getMessage());
+                Throwable cause = e.getCause();
+                if (cause != null) {
+                    sb.append(" | cause: ").append(cause.getClass().getSimpleName())
+                            .append(": ").append(cause.getMessage());
+                }
+                sb.append("\n");
+            }
+        }
+
+        String report = sb.toString();
+        logger.info(report);
+        return report;
+    }
+
     // ========================== EXPORT ==========================
 
     /**
      * Exports tag groups for all tag providers to {@code tags/<provider>/.tag-groups.json}.
      * Called automatically during {@link GitTagManager#exportTag(Path)}.
+     *
+     * <p>Non-destructive: group JSON is built entirely in memory first, then handed to
+     * {@link #writeGroupFiles(Path, Map, Map)}. A provider whose group fetch fails or returns
+     * empty is left out of the fresh map, so its previously-committed group file (from
+     * {@code preservedByProvider}) is restored rather than lost. An empty result is treated as
+     * a failed capture because every provider always has the built-in Default groups.</p>
+     *
+     * @param tagsDir             the {@code tags/} directory to write into
+     * @param preservedByProvider group-file contents snapshotted before the tags dir was cleared
+     * @param config              per-project export config; only its included providers are written,
+     *                            matching the filter used by the tag-writing loop
      */
-    public static void exportTagGroups(Path tagsDir) {
+    public static void exportTagGroups(Path tagsDir, Map<String, String> preservedByProvider, TagExportConfig config) {
         GatewayTagManager gatewayTagManager = context.getTagManager();
+        Gson gson = new GsonBuilder().setPrettyPrinting().create();
+        Map<String, String> freshByProvider = new HashMap<>();
 
         for (TagProvider tagProvider : gatewayTagManager.getTagProviders()) {
             String providerName = tagProvider.getName();
 
-            if (TagExportConfig.SYSTEM_PROVIDER_NAME.equals(providerName)) {
-                logger.debug("Skipping tag group export for built-in System provider.");
+            // Same include/System filter as the tag-writing loop, so excluded providers never get a
+            // .tag-groups.json (which would recreate an empty provider dir).
+            if (config == null || !config.isProviderIncluded(providerName)) {
+                logger.debug("Skipping tag group export for provider '" + providerName + "' (not included / System).");
                 continue;
             }
-
-            Path providerDir = tagsDir.resolve(providerName);
 
             try {
                 List<TagGroupConfiguration> tagGroups = tagProvider.getTagGroupsAsync()
                         .get(30, TimeUnit.SECONDS);
 
                 if (tagGroups == null || tagGroups.isEmpty()) {
-                    logger.debug("No tag groups found for provider '" + providerName + "', skipping export.");
+                    // Treat empty as a failed capture and preserve any existing file: every
+                    // provider always has at least the built-in Default/Default Historical groups.
+                    logger.warn("Tag group fetch for provider '" + providerName + "' returned no groups; " +
+                            "preserving any existing group file rather than deleting it.");
                     continue;
                 }
 
@@ -91,23 +263,25 @@ public class GitTagGroupManager {
                         new com.inductiveautomation.ignition.common.gson.JsonArray();
 
                 for (TagGroupConfiguration group : tagGroups) {
-                    JsonObject groupJson = serializeTagGroup(group);
-                    groupsArray.add(groupJson);
+                    groupsArray.add(serializeTagGroup(group));
                 }
 
                 root.add("tagGroups", groupsArray);
+                freshByProvider.put(providerName, gson.toJson(root));
 
-                Files.createDirectories(providerDir);
-                Path groupsFile = providerDir.resolve(TAG_GROUPS_FILENAME);
-                Gson gson = new GsonBuilder().setPrettyPrinting().create();
-                Files.writeString(groupsFile, gson.toJson(root));
-
-                logger.info("Exported " + tagGroups.size() + " tag group(s) for provider '" + providerName + "'.");
+                logger.info("Captured " + tagGroups.size() + " tag group(s) for provider '" + providerName + "'.");
 
             } catch (Exception e) {
-                logger.warn("Error exporting tag groups for provider '" + providerName + "'.", e);
+                logger.warn("Error exporting tag groups for provider '" + providerName +
+                        "'; preserving any existing group file rather than deleting it.", e);
             }
         }
+
+        // Only restore group files for included providers (this also drops the System provider),
+        // so excluded providers are not resurrected from the snapshot.
+        Map<String, String> preserved = filterIncludedProviders(preservedByProvider, config);
+
+        writeGroupFiles(tagsDir, freshByProvider, preserved);
     }
 
     /**

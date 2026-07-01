@@ -10,6 +10,7 @@ import com.inductiveautomation.ignition.common.gson.JsonObject;
 import com.inductiveautomation.ignition.common.tags.TagUtilities;
 import com.inductiveautomation.ignition.common.tags.config.CollisionPolicy;
 import com.inductiveautomation.ignition.common.tags.config.TagConfigurationModel;
+import com.inductiveautomation.ignition.common.tags.config.TagGroupConfiguration;
 import com.inductiveautomation.ignition.common.tags.model.TagPath;
 import com.inductiveautomation.ignition.common.tags.model.TagProvider;
 import com.inductiveautomation.ignition.common.tags.paths.BasicTagPath;
@@ -132,6 +133,84 @@ public class GitTagManager {
         return sb.toString();
     }
 
+    // ========================== TAG GROUP RECONCILIATION (fix #3) ==========================
+
+    /**
+     * Walks a tag JSON node and remaps any {@code tagGroup} reference that is not present in
+     * {@code knownGroups} to {@code fallbackGroup}, so a tag whose group could not be restored
+     * imports cleanly instead of erroring. Empty/absent {@code tagGroup} values (which already
+     * mean "use the provider default") are left untouched.
+     *
+     * @return the number of tag nodes that were remapped
+     */
+    static int reconcileUnknownTagGroups(JsonObject node, Set<String> knownGroups, String fallbackGroup) {
+        if (node == null) {
+            return 0;
+        }
+        int count = 0;
+
+        if (node.has("tagGroup") && node.get("tagGroup").isJsonPrimitive()) {
+            String group = node.get("tagGroup").getAsString();
+            // An empty tagGroup already means "use the provider default", so leave it alone.
+            if (group != null && !group.isEmpty()
+                    && !group.equals(fallbackGroup)
+                    && !knownGroups.contains(group)) {
+                node.addProperty("tagGroup", fallbackGroup);
+                count++;
+            }
+        }
+
+        // Recurse into child tags, which may be an array (import shape) or an object (keyed by name).
+        if (node.has("tags")) {
+            JsonElement tagsEl = node.get("tags");
+            if (tagsEl.isJsonArray()) {
+                for (JsonElement child : tagsEl.getAsJsonArray()) {
+                    if (child.isJsonObject()) {
+                        count += reconcileUnknownTagGroups(child.getAsJsonObject(), knownGroups, fallbackGroup);
+                    }
+                }
+            } else if (tagsEl.isJsonObject()) {
+                for (Map.Entry<String, JsonElement> e : tagsEl.getAsJsonObject().entrySet()) {
+                    if (e.getValue().isJsonObject()) {
+                        count += reconcileUnknownTagGroups(e.getValue().getAsJsonObject(), knownGroups, fallbackGroup);
+                    }
+                }
+            }
+        }
+
+        return count;
+    }
+
+    /**
+     * Fetches the tag group names currently defined on {@code tagProvider} and remaps any
+     * unresolved {@code tagGroup} reference in {@code root} to {@code Default}, so tags whose
+     * group could not be restored import cleanly instead of erroring. If the provider's group
+     * list can't be determined, reconciliation is skipped (tags import as-is).
+     */
+    private static void reconcileWithProviderGroups(TagProvider tagProvider, String providerName, JsonObject root) {
+        try {
+            List<TagGroupConfiguration> groups = tagProvider.getTagGroupsAsync().get(10, TimeUnit.SECONDS);
+            if (groups == null || groups.isEmpty()) {
+                logger.warn("Could not determine tag groups for provider '" + providerName +
+                        "'; importing tags without group reconciliation.");
+                return;
+            }
+            Set<String> known = new HashSet<>();
+            for (TagGroupConfiguration g : groups) {
+                known.add(g.getName());
+            }
+            int remapped = reconcileUnknownTagGroups(root, known, "Default");
+            if (remapped > 0) {
+                logger.warn("Remapped " + remapped + " tag(s) in provider '" + providerName +
+                        "' to the 'Default' tag group because their configured tag group is not present " +
+                        "on this gateway. Restore the missing tag group(s) and re-import to keep the original rates.");
+            }
+        } catch (Exception e) {
+            logger.warn("Could not reconcile tag groups for provider '" + providerName +
+                    "'; importing tags as-is.", e);
+        }
+    }
+
     // ========================== IMPORT ==========================
 
     /**
@@ -187,6 +266,10 @@ public class GitTagManager {
             if (tagProvider != null) {
                 try {
                     String json = FileUtils.readFileToString(file, StandardCharsets.UTF_8.toString());
+                    // Reconcile unresolved tag groups before import (fix #3).
+                    JsonObject root = TAG_GSON.fromJson(json, JsonObject.class);
+                    reconcileWithProviderGroups(tagProvider, providerName, root);
+                    json = TAG_GSON.toJson(root);
                     tagProvider.importTagsAsync(new BasicTagPath(""), json, "JSON", collisionPolicy, null)
                         .get(30, TimeUnit.SECONDS);
                     logger.info("Imported tags for provider '" + providerName + "' (legacy format).");
@@ -248,6 +331,10 @@ public class GitTagManager {
 
                     JsonObject root = new JsonObject();
                     root.add("tags", tagsArray);
+
+                    // Remap any tag referencing a group that isn't present on this gateway so the
+                    // import doesn't error the tag (fix #3).
+                    reconcileWithProviderGroups(tagProvider, providerName, root);
 
                     String jsonStr = TAG_GSON.toJson(root);
                     var tagResult = tagProvider.importTagsAsync(new BasicTagPath(""), jsonStr, "JSON", collisionPolicy, null)
@@ -376,6 +463,9 @@ public class GitTagManager {
                 JsonObject root = new JsonObject();
                 root.add("tags", typesArray);
 
+                // UDT member tags can also reference custom groups — reconcile before import (fix #3).
+                reconcileWithProviderGroups(tagProvider, tagProvider.getName(), root);
+
                 String jsonStr = TAG_GSON.toJson(root);
                 logger.info("Importing UDT type '" + name + "' with pathPrefix='" + pathPrefix + "', JSON length=" + jsonStr.length());
                 logger.debug("UDT import JSON: " + jsonStr);
@@ -491,6 +581,10 @@ public class GitTagManager {
         // Load config BEFORE clearing the directory so user settings are preserved
         TagExportConfig config = loadTagExportConfig(tagFolderPath);
 
+        // Snapshot existing group files BEFORE clearing so a failed group fetch below can fall
+        // back to the prior content instead of leaving the tags directory with no group files.
+        Map<String, String> preservedGroups = GitTagGroupManager.snapshotExistingGroupFiles(tagFolderPath);
+
         clearDirectory(tagFolderPath);
 
         try {
@@ -533,8 +627,10 @@ public class GitTagManager {
             // Write the config file (preserves user settings for next import)
             writeTagExportConfig(tagFolderPath, config);
 
-            // Export tag groups (scan classes) for all providers
-            GitTagGroupManager.exportTagGroups(tagFolderPath);
+            // Export tag groups (scan classes) for the same included providers as the tag files.
+            // Passing the pre-clear snapshot makes this non-destructive: providers whose groups can't
+            // be fetched keep their prior file.
+            GitTagGroupManager.exportTagGroups(tagFolderPath, preservedGroups, config);
 
         } catch (Exception e) {
             logger.error("Error exporting tags: " + e.toString(), e);

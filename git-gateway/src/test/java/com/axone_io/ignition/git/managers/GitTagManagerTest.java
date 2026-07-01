@@ -1,5 +1,6 @@
 package com.axone_io.ignition.git.managers;
 
+import com.inductiveautomation.ignition.common.gson.Gson;
 import com.inductiveautomation.ignition.common.gson.JsonObject;
 import org.junit.Rule;
 import org.junit.Test;
@@ -8,12 +9,81 @@ import org.junit.rules.TemporaryFolder;
 import java.io.File;
 import java.nio.file.Files;
 
+import java.util.HashSet;
+import java.util.Set;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class GitTagManagerTest {
+
+    private static final Gson GSON = new Gson();
+
+    private static Set<String> known(String... names) {
+        return new HashSet<>(java.util.Arrays.asList(names));
+    }
+
+    private static JsonObject parse(String json) {
+        return GSON.fromJson(json, JsonObject.class);
+    }
+
+    // ========================== reconcileUnknownTagGroups (fix #3) ==========================
+
+    @Test
+    public void reconcile_remapsUnknownGroupToFallback() {
+        JsonObject tag = parse("{\"name\":\"Level\",\"tagType\":\"AtomicTag\"," +
+                "\"tagGroup\":\"FactoryPacks Leased\"}");
+
+        int remapped = GitTagManager.reconcileUnknownTagGroups(
+                tag, known("Default", "Default Historical"), "Default");
+
+        assertEquals(1, remapped);
+        assertEquals("Default", tag.get("tagGroup").getAsString());
+    }
+
+    @Test
+    public void reconcile_leavesKnownGroupUntouched() {
+        JsonObject tag = parse("{\"name\":\"Level\",\"tagGroup\":\"Fast\"}");
+
+        int remapped = GitTagManager.reconcileUnknownTagGroups(
+                tag, known("Default", "Fast"), "Default");
+
+        assertEquals(0, remapped);
+        assertEquals("Fast", tag.get("tagGroup").getAsString());
+    }
+
+    @Test
+    public void reconcile_recursesIntoNestedFoldersAndTags() {
+        JsonObject root = parse("{\"tags\":[" +
+                "{\"name\":\"Folder\",\"tagType\":\"Folder\",\"tags\":[" +
+                "  {\"name\":\"A\",\"tagGroup\":\"Recipe\"}," +
+                "  {\"name\":\"B\",\"tagGroup\":\"Default\"}" +
+                "]}," +
+                "{\"name\":\"C\",\"tagGroup\":\"Location\"}" +
+                "]}");
+
+        int remapped = GitTagManager.reconcileUnknownTagGroups(
+                root, known("Default"), "Default");
+
+        assertEquals(2, remapped);
+    }
+
+    @Test
+    public void reconcile_ignoresEmptyAndMissingTagGroup() {
+        // Empty tagGroup already means "use default" in Ignition; a node without the
+        // property is a folder/container. Neither should be remapped or counted.
+        JsonObject root = parse("{\"tags\":[" +
+                "{\"name\":\"A\",\"tagGroup\":\"\"}," +
+                "{\"name\":\"Folder\",\"tagType\":\"Folder\"}" +
+                "]}");
+
+        int remapped = GitTagManager.reconcileUnknownTagGroups(
+                root, known("Default"), "Default");
+
+        assertEquals(0, remapped);
+    }
 
     @Test
     public void encodeFsName_leavesSafeNamesUnchanged() {
