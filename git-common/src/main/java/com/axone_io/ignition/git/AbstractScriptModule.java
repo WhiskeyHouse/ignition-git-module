@@ -217,6 +217,11 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
         return getLastHotfixStatusImpl(projectName);
     }
 
+    @Override
+    public String diagnoseTagGroups() throws Exception {
+        return diagnoseTagGroupsImpl();
+    }
+
     protected abstract boolean pullImpl(String projectName, String userName, boolean importTags, boolean importTheme,
                                         boolean importImages) throws Exception;
     protected abstract boolean pushImpl(String projectName, String userName) throws Exception;
@@ -253,5 +258,6 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
                                                       String[] changes) throws Exception;
     protected abstract HotfixResult getHotfixProgressImpl(String projectName) throws Exception;
     protected abstract HotfixResult getLastHotfixStatusImpl(String projectName) throws Exception;
+    protected abstract String diagnoseTagGroupsImpl() throws Exception;
 
 }

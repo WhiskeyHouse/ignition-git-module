@@ -130,6 +130,72 @@ public class GitTagGroupManager {
         }
     }
 
+    // ========================== DIAGNOSTIC (#2) ==========================
+
+    /**
+     * Diagnostic probe for the "empty tag groups on export" issue (#2). For every tag provider
+     * it calls {@code getTagGroupsAsync()} exactly the way {@link #exportTagGroups} does and
+     * reports, per provider: elapsed time, group count, the group names, or the exception/timeout.
+     *
+     * <p>Runnable live from the Designer/Gateway script console:
+     * {@code print system.git.diagnoseTagGroups()}. The full report is also written to the
+     * gateway log at INFO. This is a temporary diagnostic — remove once #2 is resolved.</p>
+     *
+     * @return a human-readable multi-line report
+     */
+    public static String diagnoseTagGroups() {
+        GatewayTagManager gatewayTagManager = context.getTagManager();
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== Tag Group Diagnostic ===\n");
+
+        List<TagProvider> providers = gatewayTagManager.getTagProviders();
+        sb.append("Providers found: ").append(providers.size()).append("\n");
+
+        for (TagProvider tagProvider : providers) {
+            String providerName = tagProvider.getName();
+            sb.append("\nProvider '").append(providerName).append("'");
+            if (TagExportConfig.SYSTEM_PROVIDER_NAME.equals(providerName)) {
+                sb.append(" [System — skipped by export]");
+            }
+            sb.append(":\n");
+
+            long start = System.currentTimeMillis();
+            try {
+                List<TagGroupConfiguration> groups = tagProvider.getTagGroupsAsync()
+                        .get(30, TimeUnit.SECONDS);
+                long ms = System.currentTimeMillis() - start;
+
+                if (groups == null) {
+                    sb.append("  -> NULL result after ").append(ms).append("ms\n");
+                } else if (groups.isEmpty()) {
+                    sb.append("  -> EMPTY list after ").append(ms).append("ms " +
+                            "(unexpected: built-in Default groups should always be present)\n");
+                } else {
+                    List<String> names = new ArrayList<>();
+                    for (TagGroupConfiguration g : groups) {
+                        names.add(g.getName());
+                    }
+                    sb.append("  -> ").append(groups.size()).append(" group(s) in ")
+                            .append(ms).append("ms: ").append(names).append("\n");
+                }
+            } catch (Exception e) {
+                long ms = System.currentTimeMillis() - start;
+                sb.append("  -> ").append(e.getClass().getSimpleName())
+                        .append(" after ").append(ms).append("ms: ").append(e.getMessage());
+                Throwable cause = e.getCause();
+                if (cause != null) {
+                    sb.append(" | cause: ").append(cause.getClass().getSimpleName())
+                            .append(": ").append(cause.getMessage());
+                }
+                sb.append("\n");
+            }
+        }
+
+        String report = sb.toString();
+        logger.info(report);
+        return report;
+    }
+
     // ========================== EXPORT ==========================
 
     /**

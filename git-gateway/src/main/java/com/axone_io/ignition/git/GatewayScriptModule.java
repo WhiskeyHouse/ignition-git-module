@@ -926,6 +926,11 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     }
 
     @Override
+    protected String diagnoseTagGroupsImpl() throws Exception {
+        return com.axone_io.ignition.git.managers.GitTagGroupManager.diagnoseTagGroups();
+    }
+
+    @Override
     protected List<String> getGitTrackedProjectNamesImpl() {
         List<String> projectNames = new ArrayList<>();
         try {

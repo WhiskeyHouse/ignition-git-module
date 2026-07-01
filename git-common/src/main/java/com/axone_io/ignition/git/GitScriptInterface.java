@@ -64,4 +64,7 @@ public interface GitScriptInterface {
     HotfixResult getHotfixProgress(String projectName) throws Exception;
     HotfixResult getLastHotfixStatus(String projectName) throws Exception;
 
+    // Diagnostic (#2): probe getTagGroupsAsync() per provider. Temporary.
+    String diagnoseTagGroups() throws Exception;
+
 }
