@@ -87,6 +87,19 @@ public class GitProjectManager {
         Set<StringPath> createdFolders = new HashSet<>();
 
         Set<Map.Entry<String, byte[]>> files = listFiles(projectPath);
+
+        // Pre-seed with every directory that has its own resource.json so
+        // createParentFolderResources never emits a folder resource for a path
+        // that is itself a real resource. Without this, a nested resource
+        // (e.g. a Perspective view inside another view's folder) produces both
+        // a folder and a data resource at the parent path, and a cold
+        // createOrReplace fails with "resource already exists".
+        Set<StringPath> resourceJsonDirs = files.stream()
+                .filter(e -> e.getKey().endsWith("/resource.json"))
+                .map(e -> StringPath.parse(StringUtils.substringBeforeLast(e.getKey(), "/")))
+                .collect(Collectors.toSet());
+        createdFolders.addAll(resourceJsonDirs);
+
         files.stream().collect(Collectors.groupingBy(e -> StringUtils.substringBeforeLast(e.getKey(), "/")))
                 .forEach((resourcePath, listOfFileNodes) -> {
                     StringPath stringPath = StringPath.parse(resourcePath);
@@ -100,7 +113,10 @@ public class GitProjectManager {
                         Map<String, byte[]> dataMap = createDataMap(resourceManifest, listOfFileNodes);
 
                         resources.add(createResourceBuilder(projectName, stringPath, resourceManifest, dataMap).build());
-                    } else if (!createdFolders.contains(stringPath)) {
+                    } else if (!createdFolders.contains(stringPath) || resourceJsonDirs.contains(stringPath)) {
+                        // Second clause: a resource.json existed here but failed to
+                        // parse (manifest == null) — fall back to a plain folder so
+                        // any children keep a valid parent, as before the pre-seed.
                         resources.add(createResourceBuilder(projectName, stringPath, ResourceManifest.newBuilder().build(), new HashMap<>()).setFolder(true).build());
                         createdFolders.add(stringPath);
                     }
