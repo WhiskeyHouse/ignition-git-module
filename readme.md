@@ -6,12 +6,22 @@ A free Ignition module that embeds a full-featured Git client directly into the 
 
 Requires **Ignition 8.3.1+** and **Java 17+**.
 
+> Developed and maintained independently by [WhiskeyHouse](https://github.com/WhiskeyHouse). It originated as a fork of the AXONE-IO Ignition Git module and has since been substantially rewritten and extended — see [Acknowledgments](#acknowledgments).
+
 ## Version Compatibility
 
 | Module Version | Ignition Version | Status | Download |
 |---------------|------------------|---------|----------|
 | v1.x (≤1.0.3) | 8.1.x | ⚠️ End of Life | [v1.0.3-ignition-8.1](https://github.com/WhiskeyHouse/ignition-git-module/releases/tag/v1.0.3-ignition-8.1) |
 | v2.x (≥2.0.0) | 8.3.1+ | ✅ Active Development | [Latest Release](https://github.com/WhiskeyHouse/ignition-git-module/releases) |
+
+### Support Policy
+
+Active development and support target **Ignition 8.3.1+** (module **v2.x**) on **Java 17+**.
+
+**Ignition versions below 8.3.1 are not maintained.** Module **v1.x** — the last line compatible with Ignition 8.1.x — has reached **End of Life** and receives no further feature work, bug fixes, security patches, or support. The final 8.1-compatible build, [v1.0.3-ignition-8.1](https://github.com/WhiskeyHouse/ignition-git-module/releases/tag/v1.0.3-ignition-8.1), stays available for download but is frozen and unmaintained.
+
+Because v2.x was rebuilt on Ignition 8.3's React-based gateway framework and Protobuf RPC, newer features cannot be backported to 8.1. **Bug reports and pull requests are only accepted against Ignition 8.3.1 and later.**
 
 ### Breaking Changes in v2.0.0
 
@@ -130,6 +140,16 @@ Import resources popup with collision policy:
 Documentation viewer integration in context menu:
 
 ![Docs Integration](./img/Designer-DocsIntegration.png)
+
+## Documentation
+
+| Topic | Description |
+|-------|-------------|
+| [Production Mode](docs/production-mode.md) | Safeguards for production gateways, the hotfix workflow, and `git.yaml` production settings |
+| [Scripting API (`system.git.*`)](docs/scripting-api.md) | Curated Gateway/Designer/Client scripting functions for tag import and read-only status |
+| [Docker Deployment & Commissioning](docker/readme.md) | Docker Compose deployment and automated project commissioning via `git.yaml` |
+| [Release Pipeline](RELEASE.md) | Building, code-signing, and publishing releases ([quick start](.github/RELEASE_QUICKSTART.md)) |
+| [Gateway Web UI (development)](web/README.md) | React/TypeScript gateway configuration pages |
 
 ## Installation for Development
 
