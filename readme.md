@@ -239,7 +239,7 @@ We welcome contributions! To get started:
 
 ## Acknowledgments
 
-Originally created by Enzo Sagnelonge at [AXONE-IO](https://www.axone-io.com/). Now maintained and extended by [WhiskeyHouse](https://github.com/WhiskeyHouse).
+This module began as a fork of the original [AXONE-IO](https://www.axone-io.com/) Ignition Git module created by Enzo Sagnelonge. It has since been substantially rewritten and extended, and is now developed and maintained independently by [WhiskeyHouse](https://github.com/WhiskeyHouse). Our thanks to the original authors for the foundation it was built on.
 
 ## Contact
 
