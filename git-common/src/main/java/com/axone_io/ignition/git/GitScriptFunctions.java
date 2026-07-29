@@ -67,6 +67,24 @@ public class GitScriptFunctions {
         return delegate().importTags(projectName, collisionPolicy);
     }
 
+    /**
+     * Triggers a git pull on the gateway: fetches the latest from the remote,
+     * updates the working tree, and re-imports project resources.
+     *
+     * <p>This is exposed for CI/CD pipelines that need to deploy code to a
+     * staging gateway via the WebDev pull endpoint. The pull endpoint is
+     * protected by bearer token auth.</p>
+     */
+    @JythonElement(docBundlePrefix = "GitScriptFunctions")
+    public boolean pull(@ScriptArg("projectName") String projectName,
+                        @ScriptArg("userName") String userName,
+                        @ScriptArg("importTags") boolean importTags,
+                        @ScriptArg("importThemes") boolean importThemes,
+                        @ScriptArg("importImages") boolean importImages) throws Exception {
+        requireProject(projectName);
+        return delegate().pull(projectName, userName, importTags, importThemes, importImages);
+    }
+
     @JythonElement(docBundlePrefix = "GitScriptFunctions")
     public List<UncommittedChange> getUncommittedChanges(@ScriptArg("projectName") String projectName,
                                                          @ScriptArg("userName") String userName) throws Exception {
