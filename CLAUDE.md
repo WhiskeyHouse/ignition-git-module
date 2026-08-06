@@ -74,6 +74,8 @@ Scope Legend: **C** = Client (Vision), **D** = Designer, **G** = Gateway
 | `StartupTagImporter` | git-gateway | Background tag re-import on gateway startup (`tags_importOnStartup`) |
 | `GitHubApiManager` | git-gateway | GitHub REST API client for PR creation |
 | `ProductionModePopup` | git-designer | Safety checklist dialog for production operations |
+| `ProductionCommitDialog` | git-designer | Modal pre-save commit dialog (non-hotfix production saves) |
+| `PendingProductionCommit` | git-designer | Commit details authorised at save-start, executed at save-done |
 | `HotfixCommitDialog` | git-designer | Hotfix commit dialog (description, message, changes) |
 | `HotfixProgressDialog` | git-designer | Real-time pipeline progress with clickable PR link |
 
@@ -152,7 +154,7 @@ git merge --abort  # If in merge state
 Production mode protects production gateways from accidental Git operations. When enabled:
 
 - **Pull** requires a safety checklist (4 checkboxes) + validates repo state, branch, and tags
-- **Saving** shows the safety checklist (the save is what changes the gateway), then auto-opens the commit dialog
+- **Saving** is gated in `notifyProjectSaveStart` — the safety checklist *and* the commit message are collected before anything is written. Cancelling either dialog throws, which makes `IgnitionDesigner.commitAll()` return false and aborts the save; changes stay unsaved in the Designer. `notifyProjectSaveDone` then runs the already-authorised commit. (Tag edits bypass project save entirely and cannot be gated this way.)
 - **Commits** auto-push to remote; on the production branch they trigger the automated **hotfix workflow** (branch → commit → push → create PR → merge locally → cleanup)
 - **Push** has no Designer-side warning (outbound only; the gateway still blocks pushes from unsafe repo states)
 - **Branch switching** is blocked entirely
