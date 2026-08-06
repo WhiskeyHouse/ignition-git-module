@@ -11,7 +11,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -65,9 +67,9 @@ public class ProductionModeManager {
             }
 
             // Check repository safety first
-            if (!isRepositorySafe(git.getRepository())) {
-                String warning = "Production mode: Repository is not in a safe state for pull. " +
-                        "Resolve uncommitted changes or incomplete merge/rebase before proceeding.";
+            String unsafeReason = describeUnsafeState(git.getRepository());
+            if (unsafeReason != null) {
+                String warning = "Production mode: cannot pull because " + unsafeReason;
                 logger.warn(warning);
                 config.setWarningMessage(warning);
                 config.setValid(false);
@@ -137,9 +139,9 @@ public class ProductionModeManager {
             }
 
             // Check repository safety first — this is a hard block
-            if (!isRepositorySafe(git.getRepository())) {
-                String warning = "Production mode: Repository is not in a safe state for push. " +
-                        "Resolve uncommitted changes or incomplete merge/rebase before proceeding.";
+            String unsafeReason = describeUnsafeState(git.getRepository());
+            if (unsafeReason != null) {
+                String warning = "Production mode: cannot push because " + unsafeReason;
                 logger.warn(warning);
                 config.setWarningMessage(warning);
                 config.setValid(false);
@@ -273,36 +275,94 @@ public class ProductionModeManager {
      * special state (e.g., merging, rebasing, cherry-picking).
      */
     public static boolean isRepositorySafe(Repository repository) {
+        return describeUnsafeState(repository) == null;
+    }
+
+    /**
+     * Maximum number of offending paths named in an unsafe-state message. Beyond this the
+     * message summarises the remainder rather than dumping an unreadable wall of paths.
+     */
+    private static final int MAX_REPORTED_PATHS = 10;
+
+    /**
+     * Explain why the repository is unsafe for production operations, or return {@code null}
+     * if it is safe.
+     *
+     * <p>Callers put this string in front of the user, so it names the offending paths. Knowing
+     * <em>that</em> the working tree is dirty is not actionable on a gateway you have to SSH into
+     * to inspect; knowing <em>which</em> files are dirty is.</p>
+     *
+     * <p>A repository is unsafe if it has uncommitted changes to tracked files or is in a special
+     * state (merging, rebasing, cherry-picking). Untracked files are intentionally ignored, since
+     * Ignition may create temporary files in the project directory.</p>
+     */
+    public static String describeUnsafeState(Repository repository) {
         try {
             logger.debug("Checking repository safety for production operations");
 
-            // Check repository state (merging, rebasing, etc.)
             RepositoryState state = repository.getRepositoryState();
             if (state != RepositoryState.SAFE) {
                 logger.warn("Repository is in an unsafe state for production operations: {}", state);
-                return false;
+                return "the repository is in the " + state.name() + " state (an unfinished merge, "
+                        + "rebase or cherry-pick). Finish or abort it before proceeding.";
             }
 
-            // Check for uncommitted changes (untracked files are ignored as Ignition
-            // may create temporary files in the project directory)
             try (Git git = new Git(repository)) {
                 Status status = git.status().call();
 
                 if (status.hasUncommittedChanges()) {
-                    logger.warn("Repository has uncommitted changes — unsafe for production operations. " +
-                            "Modified: {}, Added: {}, Removed: {}",
+                    List<String> paths = new ArrayList<>();
+                    addPaths(paths, status.getConflicting());
+                    addPaths(paths, status.getChanged());
+                    addPaths(paths, status.getModified());
+                    addPaths(paths, status.getAdded());
+                    addPaths(paths, status.getRemoved());
+                    addPaths(paths, status.getMissing());
+
+                    logger.warn("Repository has uncommitted changes — unsafe for production operations. "
+                                    + "Modified: {}, Added: {}, Removed: {}, Missing: {}, Conflicting: {}",
                             status.getModified().size(),
                             status.getAdded().size(),
-                            status.getRemoved().size());
-                    return false;
+                            status.getRemoved().size(),
+                            status.getMissing().size(),
+                            status.getConflicting().size());
+
+                    return "the repository has " + paths.size() + " uncommitted change(s):\n"
+                            + formatPaths(paths)
+                            + "\nCommit or discard them before proceeding.";
                 }
             }
 
             logger.debug("Repository is safe for production operations");
-            return true;
+            return null;
         } catch (Exception e) {
             logger.error("Error checking repository safety", e);
-            return false;
+            return "the repository state could not be verified: " + e.getMessage();
         }
+    }
+
+    private static void addPaths(List<String> target, Set<String> paths) {
+        if (paths == null) {
+            return;
+        }
+        List<String> sorted = new ArrayList<>(paths);
+        Collections.sort(sorted);
+        for (String path : sorted) {
+            if (!target.contains(path)) {
+                target.add(path);
+            }
+        }
+    }
+
+    private static String formatPaths(List<String> paths) {
+        StringBuilder sb = new StringBuilder();
+        int shown = Math.min(paths.size(), MAX_REPORTED_PATHS);
+        for (int i = 0; i < shown; i++) {
+            sb.append("  • ").append(paths.get(i)).append('\n');
+        }
+        if (paths.size() > shown) {
+            sb.append("  … and ").append(paths.size() - shown).append(" more\n");
+        }
+        return sb.toString();
     }
 }

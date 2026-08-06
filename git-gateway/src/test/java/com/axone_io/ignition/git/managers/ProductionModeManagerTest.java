@@ -156,7 +156,7 @@ public class ProductionModeManagerTest {
 
         ProductionModeConfig config = new ProductionModeConfig(true, "main", null);
         assertFalse(ProductionModeManager.validatePull(git, config));
-        assertTrue(config.getWarningMessage().contains("not in a safe state"));
+        assertTrue(config.getWarningMessage().contains("uncommitted change(s)"));
     }
 
     @Test
@@ -167,7 +167,7 @@ public class ProductionModeManagerTest {
 
         ProductionModeConfig config = new ProductionModeConfig(true, "feature", null);
         assertFalse(ProductionModeManager.validatePush(git, config, "feature"));
-        assertTrue(config.getWarningMessage().contains("not in a safe state"));
+        assertTrue(config.getWarningMessage().contains("uncommitted change(s)"));
     }
 
     // --- validateTagPattern tests ---
@@ -247,6 +247,106 @@ public class ProductionModeManagerTest {
         git.add().addFilepattern("staged.txt").call();
 
         assertFalse(ProductionModeManager.isRepositorySafe(repository));
+    }
+
+    // --- describeUnsafeState tests ---
+
+    @Test
+    public void describeUnsafeState_cleanRepo_returnsNull() {
+        assertNull(ProductionModeManager.describeUnsafeState(repository));
+    }
+
+    @Test
+    public void describeUnsafeState_untrackedFiles_returnsNull() throws Exception {
+        File newFile = new File(repository.getWorkTree(), "untracked.txt");
+        Files.writeString(newFile.toPath(), "new file");
+
+        assertNull(ProductionModeManager.describeUnsafeState(repository));
+    }
+
+    @Test
+    public void describeUnsafeState_namesTheOffendingPath() throws Exception {
+        File readme = new File(repository.getWorkTree(), "README.md");
+        Files.writeString(readme.toPath(), "modified content");
+
+        String reason = ProductionModeManager.describeUnsafeState(repository);
+
+        assertNotNull(reason);
+        // The whole point of the message: it must name the file, not just say "dirty".
+        assertTrue("expected the path in: " + reason, reason.contains("README.md"));
+        assertTrue("expected a count in: " + reason, reason.contains("1 uncommitted change(s)"));
+    }
+
+    @Test
+    public void describeUnsafeState_namesStagedPath() throws Exception {
+        File staged = new File(repository.getWorkTree(), "staged.txt");
+        Files.writeString(staged.toPath(), "staged content");
+        git.add().addFilepattern("staged.txt").call();
+
+        String reason = ProductionModeManager.describeUnsafeState(repository);
+
+        assertNotNull(reason);
+        assertTrue("expected the path in: " + reason, reason.contains("staged.txt"));
+    }
+
+    @Test
+    public void describeUnsafeState_namesDeletedPath() throws Exception {
+        File readme = new File(repository.getWorkTree(), "README.md");
+        assertTrue(readme.delete());
+
+        String reason = ProductionModeManager.describeUnsafeState(repository);
+
+        assertNotNull(reason);
+        assertTrue("expected the path in: " + reason, reason.contains("README.md"));
+    }
+
+    @Test
+    public void describeUnsafeState_manyChanges_capsListAndReportsRemainder() throws Exception {
+        // Commit 15 tracked files, then dirty all of them.
+        for (int i = 0; i < 15; i++) {
+            Files.writeString(new File(repository.getWorkTree(), "file" + i + ".txt").toPath(), "v1");
+        }
+        git.add().addFilepattern(".").call();
+        git.commit().setMessage("add files").call();
+        for (int i = 0; i < 15; i++) {
+            Files.writeString(new File(repository.getWorkTree(), "file" + i + ".txt").toPath(), "v2");
+        }
+
+        String reason = ProductionModeManager.describeUnsafeState(repository);
+
+        assertNotNull(reason);
+        assertTrue("expected full count in: " + reason, reason.contains("15 uncommitted change(s)"));
+        assertTrue("expected a truncation notice in: " + reason, reason.contains("and 5 more"));
+        // Only MAX_REPORTED_PATHS bullets, so the dialog stays readable.
+        assertEquals(10, reason.split("• ", -1).length - 1);
+    }
+
+    @Test
+    public void validatePush_unsafeRepo_warningNamesTheOffendingPath() throws Exception {
+        File readme = new File(repository.getWorkTree(), "README.md");
+        Files.writeString(readme.toPath(), "modified content");
+
+        ProductionModeConfig config = new ProductionModeConfig();
+        config.setProductionMode(true);
+        config.setProductionBranch("main");
+
+        assertFalse(ProductionModeManager.validatePush(git, config, "main"));
+        assertTrue("expected the path in: " + config.getWarningMessage(),
+                config.getWarningMessage().contains("README.md"));
+    }
+
+    @Test
+    public void validatePull_unsafeRepo_warningNamesTheOffendingPath() throws Exception {
+        File readme = new File(repository.getWorkTree(), "README.md");
+        Files.writeString(readme.toPath(), "modified content");
+
+        ProductionModeConfig config = new ProductionModeConfig();
+        config.setProductionMode(true);
+        config.setProductionBranch("main");
+
+        assertFalse(ProductionModeManager.validatePull(git, config));
+        assertTrue("expected the path in: " + config.getWarningMessage(),
+                config.getWarningMessage().contains("README.md"));
     }
 
     // --- listTags tests ---

@@ -147,6 +147,26 @@ Before pull or push operations, the module verifies:
 
 Untracked files are intentionally ignored since Ignition may create temporary files in the project directory.
 
+When a check fails, the error names the offending paths (up to 10, then a count of the remainder) so the problem can be resolved without shelling into the gateway:
+
+```
+Production mode: cannot push because the repository has 3 uncommitted change(s):
+  • com.inductiveautomation.perspective/views/Overview/view.json
+  • ignition/script-python/util/code.py
+  • tags/default/.tag-groups.json
+Commit or discard them before proceeding.
+```
+
+### Why a partial commit blocks the push
+
+In production mode a commit auto-pushes. Both commit dialogs let you select a subset of the
+changed resources — and anything you leave unselected keeps the working tree dirty, which makes
+the push fail the safety check above. The commit still succeeds; only the push is skipped, and
+the message says so explicitly along with what is still outstanding.
+
+If you want the push to go through, commit or discard everything, or push manually once the tree
+is clean.
+
 ### Pull Validation Flow
 
 ```mermaid

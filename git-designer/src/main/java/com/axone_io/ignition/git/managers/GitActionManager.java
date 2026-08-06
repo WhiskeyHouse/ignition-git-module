@@ -15,6 +15,7 @@ import com.axone_io.ignition.git.HotfixProgressDialog;
 import com.axone_io.ignition.git.ProductionModePopup;
 import com.axone_io.ignition.git.PullPopup;
 import com.axone_io.ignition.git.UncommittedChange;
+import com.axone_io.ignition.git.actions.GitBaseAction;
 import com.inductiveautomation.ignition.common.resourcecollection.ChangeOperation;
 import com.inductiveautomation.ignition.common.resourcecollection.ResourceId;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
@@ -369,8 +370,11 @@ public class GitActionManager {
                     SwingUtilities.invokeLater(() -> showConfirmPopup(message, JOptionPane.INFORMATION_MESSAGE));
                 } catch (Exception e) {
                     logger.error("Error during push", e);
+                    // A production guard rejecting the push is an expected, actionable outcome —
+                    // lead with the gateway's reason rather than a wrapped ExecutionException.
                     SwingUtilities.invokeLater(() -> {
-                        com.inductiveautomation.ignition.client.util.gui.ErrorUtil.showError(e);
+                        com.inductiveautomation.ignition.client.util.gui.ErrorUtil.showError(
+                                "Push did not run:\n\n" + GitBaseAction.rootMessage(e), e);
                     });
                 }
             }
