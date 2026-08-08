@@ -16,6 +16,7 @@ import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 public class GitProjectManagerTest {
@@ -87,6 +88,39 @@ public class GitProjectManagerTest {
         }
         assertTrue(find(resources, "Broken").isFolder());
         assertFalse(find(resources, "Broken/Child").isFolder());
+    }
+
+    /**
+     * "attributes" is optional in resource.json — real Ignition projects contain resources
+     * without it. ResourceBuilder.setAttributes does {@code new HashMap<>(map)}, so a missing key
+     * became {@code NullPointerException: Cannot invoke "java.util.Map.size()"} and aborted the
+     * whole import: a pull updated the working tree but never loaded the project, and
+     * commissioning left the project on its previous version with only a logged error.
+     *
+     * <p>Every other fixture in this class hardcodes {@code "attributes":{}}, which is exactly
+     * why the existing tests never caught it.</p>
+     */
+    @Test
+    public void resourceJsonWithoutAttributesStillImports() throws Exception {
+        File root = tmp.newFolder("project");
+        Path resource = root.toPath()
+                .resolve("com.inductiveautomation.webdev/resources/tagConfig");
+        Files.createDirectories(resource);
+        Files.write(resource.resolve("doGet.py"), "def doGet(request, session): pass".getBytes());
+        // No "attributes" key, and no "documentation" either - copied from the shape Ignition
+        // actually writes for WebDev python resources.
+        Files.write(resource.resolve("resource.json"),
+                ("{\"scope\":\"G\",\"version\":1,\"restricted\":false,\"overridable\":true,"
+                        + "\"files\":[\"doGet.py\"]}").getBytes());
+
+        Set<Resource> resources = GitProjectManager.importFromFolder(root.toPath(), "TestProject");
+
+        Resource imported = find(resources, "tagConfig");
+        assertFalse("resource with its own resource.json must not be a folder",
+                imported.isFolder());
+        assertNotNull("attributes must be usable, not null", imported.getAttributes());
+        assertTrue("no attributes in resource.json means no attributes on the resource",
+                imported.getAttributes().isEmpty());
     }
 
     private static Resource find(Set<Resource> resources, String pathSuffix) {

@@ -178,7 +178,15 @@ public class GitProjectManager {
                 .setResourcePath(new ResourcePath(new ResourceType(moduleId, resourceType), subPath))
                 .setDataBytes(dataMap)
                 .setRestricted(manifest.isRestricted())
-                .setAttributes(manifest.getAttributes())
+                // "attributes" is optional in resource.json, so Gson leaves it null for the many
+                // real resources that omit it — and ResourceBuilder.setAttributes does
+                // new HashMap<>(map), which NPEs on null and aborted the entire project import.
+                // Of the manifest values used here this is the only null-hostile one:
+                // setDocumentation is a plain field assignment, and isRestricted/getVersion/
+                // isOverridable return primitives.
+                .setAttributes(manifest.getAttributes() == null
+                        ? Collections.emptyMap()
+                        : manifest.getAttributes())
                 .setApplicationScope(manifest.getScope())
                 .setDocumentation(manifest.getDocumentation())
                 .setVersion(manifest.getVersion())
