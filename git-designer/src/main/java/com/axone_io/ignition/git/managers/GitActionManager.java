@@ -15,6 +15,7 @@ import com.axone_io.ignition.git.HotfixProgressDialog;
 import com.axone_io.ignition.git.ProductionModePopup;
 import com.axone_io.ignition.git.PullPopup;
 import com.axone_io.ignition.git.UncommittedChange;
+import com.axone_io.ignition.git.actions.GitBaseAction;
 import com.inductiveautomation.ignition.common.resourcecollection.ChangeOperation;
 import com.inductiveautomation.ignition.common.resourcecollection.ResourceId;
 import com.inductiveautomation.ignition.common.util.LoggerEx;
@@ -180,7 +181,14 @@ public class GitActionManager {
             protected Object[] doInBackground() throws Exception {
                 ProductionModeConfig config = rpc.getProductionModeConfig(projectName);
                 String currentBranch = rpc.getCurrentBranch(projectName);
-                return new Object[]{config, currentBranch};
+                // Advisory only — a failure here must not stop the user from pulling.
+                String divergence = null;
+                try {
+                    divergence = rpc.getUnpushedProductionCommits(projectName);
+                } catch (Exception e) {
+                    logger.warn("Could not check for unpushed production commits", e);
+                }
+                return new Object[]{config, currentBranch, divergence};
             }
 
             @Override
@@ -189,6 +197,7 @@ public class GitActionManager {
                     Object[] results = get();
                     ProductionModeConfig prodConfig = (ProductionModeConfig) results[0];
                     String currentBranch = (String) results[1];
+                    String divergence = (String) results[2];
 
                     // Block pull on hotfix branches
                     if (currentBranch != null && currentBranch.startsWith("hotfix/")) {
@@ -205,7 +214,11 @@ public class GitActionManager {
                     if (prodConfig.isProductionMode()) {
                         logger.info("Production mode is active for project: " + projectName);
 
-                        new ProductionModePopup(context.getFrame(), prodConfig, "Pull from Git") {
+                        if (divergence != null) {
+                            logger.warn("Pull requested while production branch has unpushed commits: {}", divergence);
+                        }
+
+                        new ProductionModePopup(context.getFrame(), prodConfig, "Pull from Git", divergence) {
                             @Override
                             public void onProceed() {
                                 // User confirmed, show regular pull popup
@@ -369,8 +382,12 @@ public class GitActionManager {
                     SwingUtilities.invokeLater(() -> showConfirmPopup(message, JOptionPane.INFORMATION_MESSAGE));
                 } catch (Exception e) {
                     logger.error("Error during push", e);
+                    // A production guard rejecting the push is an expected, actionable outcome —
+                    // lead with the gateway's reason rather than a wrapped ExecutionException.
                     SwingUtilities.invokeLater(() -> {
-                        com.inductiveautomation.ignition.client.util.gui.ErrorUtil.showError(e);
+                        com.inductiveautomation.ignition.client.util.gui.ErrorUtil.showError(
+                                "Push failed or could not be confirmed:\n\n"
+                                        + GitBaseAction.rootMessage(e), e);
                     });
                 }
             }

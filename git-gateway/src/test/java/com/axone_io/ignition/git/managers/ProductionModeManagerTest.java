@@ -156,7 +156,7 @@ public class ProductionModeManagerTest {
 
         ProductionModeConfig config = new ProductionModeConfig(true, "main", null);
         assertFalse(ProductionModeManager.validatePull(git, config));
-        assertTrue(config.getWarningMessage().contains("not in a safe state"));
+        assertTrue(config.getWarningMessage().contains("uncommitted change(s)"));
     }
 
     @Test
@@ -167,7 +167,7 @@ public class ProductionModeManagerTest {
 
         ProductionModeConfig config = new ProductionModeConfig(true, "feature", null);
         assertFalse(ProductionModeManager.validatePush(git, config, "feature"));
-        assertTrue(config.getWarningMessage().contains("not in a safe state"));
+        assertTrue(config.getWarningMessage().contains("uncommitted change(s)"));
     }
 
     // --- validateTagPattern tests ---
@@ -249,6 +249,132 @@ public class ProductionModeManagerTest {
         assertFalse(ProductionModeManager.isRepositorySafe(repository));
     }
 
+    // --- describeUnsafeState tests ---
+
+    @Test
+    public void describeUnsafeState_cleanRepo_returnsNull() {
+        assertNull(ProductionModeManager.describeUnsafeState(repository));
+    }
+
+    @Test
+    public void describeUnsafeState_untrackedFiles_returnsNull() throws Exception {
+        File newFile = new File(repository.getWorkTree(), "untracked.txt");
+        Files.writeString(newFile.toPath(), "new file");
+
+        assertNull(ProductionModeManager.describeUnsafeState(repository));
+    }
+
+    @Test
+    public void describeUnsafeState_namesTheOffendingPath() throws Exception {
+        File readme = new File(repository.getWorkTree(), "README.md");
+        Files.writeString(readme.toPath(), "modified content");
+
+        String reason = ProductionModeManager.describeUnsafeState(repository);
+
+        assertNotNull(reason);
+        // The whole point of the message: it must name the file, not just say "dirty".
+        assertTrue("expected the path in: " + reason, reason.contains("README.md"));
+        assertTrue("expected a count in: " + reason, reason.contains("1 uncommitted change(s)"));
+    }
+
+    @Test
+    public void describeUnsafeState_namesStagedPath() throws Exception {
+        File staged = new File(repository.getWorkTree(), "staged.txt");
+        Files.writeString(staged.toPath(), "staged content");
+        git.add().addFilepattern("staged.txt").call();
+
+        String reason = ProductionModeManager.describeUnsafeState(repository);
+
+        assertNotNull(reason);
+        assertTrue("expected the path in: " + reason, reason.contains("staged.txt"));
+    }
+
+    @Test
+    public void describeUnsafeState_namesDeletedPath() throws Exception {
+        File readme = new File(repository.getWorkTree(), "README.md");
+        assertTrue(readme.delete());
+
+        String reason = ProductionModeManager.describeUnsafeState(repository);
+
+        assertNotNull(reason);
+        assertTrue("expected the path in: " + reason, reason.contains("README.md"));
+    }
+
+    @Test
+    public void describeUnsafeState_manyChanges_capsListAndReportsRemainder() throws Exception {
+        // Commit 15 tracked files, then dirty all of them.
+        for (int i = 0; i < 15; i++) {
+            Files.writeString(new File(repository.getWorkTree(), "file" + i + ".txt").toPath(), "v1");
+        }
+        git.add().addFilepattern(".").call();
+        git.commit().setMessage("add files").call();
+        for (int i = 0; i < 15; i++) {
+            Files.writeString(new File(repository.getWorkTree(), "file" + i + ".txt").toPath(), "v2");
+        }
+
+        String reason = ProductionModeManager.describeUnsafeState(repository);
+
+        assertNotNull(reason);
+        assertTrue("expected full count in: " + reason, reason.contains("15 uncommitted change(s)"));
+        assertTrue("expected a truncation notice in: " + reason, reason.contains("and 5 more"));
+        // Only MAX_REPORTED_PATHS bullets, so the dialog stays readable.
+        assertEquals(10, reason.split("• ", -1).length - 1);
+    }
+
+    @Test
+    public void describeUnsafeState_sortsPathsAcrossStatusesNotWithinThem() throws Exception {
+        // One path per status bucket, named so that per-bucket ordering and global ordering
+        // disagree: 'a_deleted' is collected last (missing) but must be reported first.
+        Files.writeString(new File(repository.getWorkTree(), "m_modified.txt").toPath(), "v1");
+        Files.writeString(new File(repository.getWorkTree(), "a_deleted.txt").toPath(), "v1");
+        git.add().addFilepattern(".").call();
+        git.commit().setMessage("seed").call();
+
+        Files.writeString(new File(repository.getWorkTree(), "m_modified.txt").toPath(), "v2");
+        assertTrue(new File(repository.getWorkTree(), "a_deleted.txt").delete());
+        Files.writeString(new File(repository.getWorkTree(), "z_added.txt").toPath(), "new");
+        git.add().addFilepattern("z_added.txt").call();
+
+        String reason = ProductionModeManager.describeUnsafeState(repository);
+
+        assertNotNull(reason);
+        int deleted = reason.indexOf("a_deleted.txt");
+        int modified = reason.indexOf("m_modified.txt");
+        int added = reason.indexOf("z_added.txt");
+        assertTrue("all three paths should be reported: " + reason,
+                deleted >= 0 && modified >= 0 && added >= 0);
+        assertTrue("expected global alphabetical order, got: " + reason,
+                deleted < modified && modified < added);
+    }
+
+    @Test
+    public void validatePush_unsafeRepo_warningNamesTheOffendingPath() throws Exception {
+        File readme = new File(repository.getWorkTree(), "README.md");
+        Files.writeString(readme.toPath(), "modified content");
+
+        ProductionModeConfig config = new ProductionModeConfig();
+        config.setProductionMode(true);
+        config.setProductionBranch("main");
+
+        assertFalse(ProductionModeManager.validatePush(git, config, "main"));
+        assertTrue("expected the path in: " + config.getWarningMessage(),
+                config.getWarningMessage().contains("README.md"));
+    }
+
+    @Test
+    public void validatePull_unsafeRepo_warningNamesTheOffendingPath() throws Exception {
+        File readme = new File(repository.getWorkTree(), "README.md");
+        Files.writeString(readme.toPath(), "modified content");
+
+        ProductionModeConfig config = new ProductionModeConfig();
+        config.setProductionMode(true);
+        config.setProductionBranch("main");
+
+        assertFalse(ProductionModeManager.validatePull(git, config));
+        assertTrue("expected the path in: " + config.getWarningMessage(),
+                config.getWarningMessage().contains("README.md"));
+    }
+
     // --- listTags tests ---
 
     @Test
@@ -327,5 +453,144 @@ public class ProductionModeManagerTest {
         ProductionModeConfig config = new ProductionModeConfig(true, "main", null);
         assertTrue(ProductionModeManager.validatePush(git, config, "hotfix/fix-pump-alarm"));
         assertFalse(config.hasWarnings());
+    }
+
+    // --- Unpushed production commit (divergence) tests ---
+
+    /**
+     * Wire the test repo up to a throwaway bare remote and get {@code main} in sync with it,
+     * so that later local commits make the branch genuinely "ahead".
+     */
+    private void setUpRemote() throws Exception {
+        File remoteDir = tempFolder.newFolder("remote-repo.git");
+        // setInitialBranch matters: without it the bare repo's HEAD dangles at refs/heads/master,
+        // which makes the clone in the behind-only test resolve a nonexistent ref.
+        Git.init().setBare(true).setInitialBranch("main").setDirectory(remoteDir).call().close();
+
+        StoredConfig cfg = repository.getConfig();
+        cfg.setString("remote", "origin", "url", remoteDir.getAbsolutePath());
+        cfg.setString("remote", "origin", "fetch", "+refs/heads/*:refs/remotes/origin/*");
+        cfg.setString("branch", "main", "remote", "origin");
+        cfg.setString("branch", "main", "merge", "refs/heads/main");
+        cfg.save();
+
+        git.push().setRemote("origin").add("main").call();
+        git.fetch().setRemote("origin").call();
+    }
+
+    /** Commit a new tracked file so HEAD advances past the remote-tracking ref. */
+    private void commitLocally(String fileName, String message) throws Exception {
+        Files.writeString(new File(repository.getWorkTree(), fileName).toPath(), "content");
+        git.add().addFilepattern(fileName).call();
+        git.commit().setMessage(message).call();
+    }
+
+    @Test
+    public void describeUnpushedProductionCommits_noRemoteConfigured_returnsNull() {
+        // A repo with no remote cannot be diverged from one.
+        assertNull(ProductionModeManager.describeUnpushedProductionCommits(git, "main"));
+    }
+
+    @Test
+    public void describeUnpushedProductionCommits_inSyncWithRemote_returnsNull() throws Exception {
+        setUpRemote();
+        assertNull(ProductionModeManager.describeUnpushedProductionCommits(git, "main"));
+    }
+
+    @Test
+    public void describeUnpushedProductionCommits_aheadOfRemote_namesTheCommit() throws Exception {
+        setUpRemote();
+        commitLocally("hotfix.txt", "Fix pump 3 alarm threshold");
+
+        String reason = ProductionModeManager.describeUnpushedProductionCommits(git, "main");
+
+        assertNotNull(reason);
+        assertTrue("expected a count in: " + reason, reason.contains("1 commit"));
+        // The whole point: name what is unpushed, so the engineer can find the open PR.
+        assertTrue("expected the subject in: " + reason,
+                reason.contains("Fix pump 3 alarm threshold"));
+    }
+
+    @Test
+    public void describeUnpushedProductionCommits_severalAhead_reportsFullCount() throws Exception {
+        setUpRemote();
+        commitLocally("a.txt", "First hotfix");
+        commitLocally("b.txt", "Second hotfix");
+
+        String reason = ProductionModeManager.describeUnpushedProductionCommits(git, "main");
+
+        assertNotNull(reason);
+        assertTrue("expected a count in: " + reason, reason.contains("2 commit"));
+        assertTrue(reason.contains("First hotfix"));
+        assertTrue(reason.contains("Second hotfix"));
+    }
+
+    @Test
+    public void describeUnpushedProductionCommits_behindRemoteOnly_returnsNull() throws Exception {
+        setUpRemote();
+        // Advance the remote past us, leaving local strictly behind — that is what pull is for,
+        // not something to warn about.
+        File otherDir = tempFolder.newFolder("other-clone");
+        try (Git other = Git.cloneRepository()
+                .setURI(repository.getConfig().getString("remote", "origin", "url"))
+                .setDirectory(otherDir).call()) {
+            StoredConfig otherCfg = other.getRepository().getConfig();
+            otherCfg.setBoolean("commit", null, "gpgSign", false);
+            otherCfg.save();
+            Files.writeString(new File(otherDir, "remote-change.txt").toPath(), "x");
+            other.add().addFilepattern("remote-change.txt").call();
+            other.commit().setMessage("Change made elsewhere").call();
+            other.push().call();
+        }
+        git.fetch().setRemote("origin").call();
+
+        assertNull(ProductionModeManager.describeUnpushedProductionCommits(git, "main"));
+    }
+
+    @Test
+    public void describeUnpushedProductionCommits_notOnProductionBranch_returnsNull() throws Exception {
+        setUpRemote();
+        commitLocally("hotfix.txt", "Fix pump 3 alarm threshold");
+        git.branchCreate().setName("hotfix/fix-pump-alarm").call();
+        git.checkout().setName("hotfix/fix-pump-alarm").call();
+
+        // Asked about a branch we are not on; the check is scoped to the production branch only.
+        assertNull(ProductionModeManager.describeUnpushedProductionCommits(git, "release"));
+    }
+
+    @Test
+    public void validatePull_aheadOfRemote_allowsPullButWarns() throws Exception {
+        setUpRemote();
+        commitLocally("hotfix.txt", "Fix pump 3 alarm threshold");
+
+        ProductionModeConfig config = new ProductionModeConfig(true, "main", null);
+
+        // Divergence must never strand a production gateway: pull still allowed.
+        assertTrue(ProductionModeManager.validatePull(git, config));
+        assertTrue("expected a warning, got: " + config.getWarningMessage(), config.hasWarnings());
+        assertTrue("expected the subject in: " + config.getWarningMessage(),
+                config.getWarningMessage().contains("Fix pump 3 alarm threshold"));
+    }
+
+    @Test
+    public void validatePull_inSyncWithRemote_noWarning() throws Exception {
+        setUpRemote();
+
+        ProductionModeConfig config = new ProductionModeConfig(true, "main", null);
+        assertTrue(ProductionModeManager.validatePull(git, config));
+        assertFalse(config.hasWarnings());
+    }
+
+    @Test
+    public void validatePull_unsafeRepoAndAhead_reportsBlockNotDivergence() throws Exception {
+        setUpRemote();
+        commitLocally("hotfix.txt", "Fix pump 3 alarm threshold");
+        Files.writeString(new File(repository.getWorkTree(), "README.md").toPath(), "dirty");
+
+        ProductionModeConfig config = new ProductionModeConfig(true, "main", null);
+
+        // A hard block outranks an advisory warning — the user needs the actionable one.
+        assertFalse(ProductionModeManager.validatePull(git, config));
+        assertTrue(config.getWarningMessage().contains("uncommitted change(s)"));
     }
 }

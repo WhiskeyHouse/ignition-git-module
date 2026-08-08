@@ -147,6 +147,26 @@ Before pull or push operations, the module verifies:
 
 Untracked files are intentionally ignored since Ignition may create temporary files in the project directory.
 
+When a check fails, the error names the offending paths (up to 10, then a count of the remainder) so the problem can be resolved without shelling into the gateway:
+
+```text
+Production mode: cannot push because the repository has 3 uncommitted change(s):
+  • com.inductiveautomation.perspective/views/Overview/view.json
+  • ignition/script-python/util/code.py
+  • tags/default/.tag-groups.json
+Commit or discard them before proceeding.
+```
+
+### Why a partial commit blocks the push
+
+In production mode a commit auto-pushes. Both commit dialogs let you select a subset of the
+changed resources — and anything you leave unselected keeps the working tree dirty, which makes
+the push fail the safety check above. The commit still succeeds; only the push is skipped, and
+the message says so explicitly along with what is still outstanding.
+
+If you want the push to go through, commit or discard everything, or push manually once the tree
+is clean.
+
 ### Pull Validation Flow
 
 ```mermaid
@@ -275,6 +295,46 @@ graph LR
 ```
 
 After the hotfix, the module merges the hotfix branch into the **local** production branch rather than pulling from the remote. This is critical: the remote production branch may contain other merged changes not intended for this gateway. The local merge only brings in the engineer's fix.
+
+### Unpushed Production Commits
+
+The pipeline pushes only the `hotfix/*` branch. The local production branch is never pushed, so
+after a hotfix the gateway is **one commit ahead of the remote** until someone merges the pull
+request. Until that happens, the gateway is running code that exists in no shared branch.
+
+Production mode surfaces this rather than assuming the PR gets merged:
+
+- **Pull in production mode** shows an amber *Unpushed Production Commits* panel in the safety
+  dialog, naming each commit (short hash + subject) that the remote has not seen.
+- The same text is logged at `WARN` on the gateway.
+- It is available over RPC as `getUnpushedProductionCommits(projectName)`, which returns `null`
+  when there is nothing to report. (Not currently part of the curated `system.git.*` facade.)
+
+**This is advisory and never blocks a pull.** Two reasons:
+
+1. Being ahead is the *expected* state right after a hotfix, not an error.
+2. If the PR is squash-merged, the remote gets an equivalent commit with a **different hash**, so
+   the branch reads as permanently ahead. Blocking on that would strand the gateway.
+
+> **Freshness caveat:** the comparison is against the remote-tracking ref, so it is only as current
+> as the last fetch — hence the "as of the last fetch" wording in the message. A PR merged since
+> the last fetch still reads as unpushed until the gateway fetches again.
+
+#### Recommended repository setting
+
+For repositories backing a production gateway, merge hotfix PRs with a **merge commit**. It is the
+only strategy that preserves the commit the gateway is actually running:
+
+| GitHub merge button | Lands on the remote | Next gateway pull |
+|---|---|---|
+| **Merge commit** | The exact hotfix commit hash | Clean fast-forward |
+| Squash | A new commit, same content, rewritten hash | Histories permanently forked |
+| Rebase | A new commit, same content, rewritten hash | Histories permanently forked |
+
+Squash and rebase both rewrite commit identity. The divergence check compares commit hashes, so
+under either strategy the gateway's commit never appears on the remote and the branch reads as
+permanently ahead. Only a merge commit lets the gateway's history reconcile on the next pull and
+clears the advisory by itself.
 
 ### Hotfix Branch Rules
 

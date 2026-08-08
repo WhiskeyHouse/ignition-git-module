@@ -20,6 +20,16 @@ public class ProductionModePopup extends JDialog {
     private boolean confirmed = false;
 
     public ProductionModePopup(Component parent, ProductionModeConfig config, String operation) {
+        this(parent, config, operation, null);
+    }
+
+    /**
+     * @param divergenceNotice advisory text describing production-branch commits the remote has
+     *                         not seen (typically an unmerged hotfix), or {@code null} if none.
+     *                         Rendered as an advisory, not a blocker — it never gates Proceed.
+     */
+    public ProductionModePopup(Component parent, ProductionModeConfig config, String operation,
+                               String divergenceNotice) {
         super(parent instanceof Window ? (Window) parent : SwingUtilities.getWindowAncestor(parent),
               "⚠️ Production Mode Warning", ModalityType.APPLICATION_MODAL);
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
@@ -96,6 +106,31 @@ public class ProductionModePopup extends JDialog {
             ));
             warningArea.setAlignmentX(Component.LEFT_ALIGNMENT);
             mainPanel.add(warningArea);
+            mainPanel.add(Box.createVerticalStrut(15));
+        }
+
+        // Unpushed production commits — advisory, distinct from the red hard-warning box above.
+        // Amber signals "know this before you proceed", not "you cannot proceed".
+        if (divergenceNotice != null && !divergenceNotice.isEmpty()) {
+            JTextArea divergenceArea = new JTextArea(divergenceNotice);
+            divergenceArea.setEditable(false);
+            divergenceArea.setLineWrap(true);
+            divergenceArea.setWrapStyleWord(true);
+            divergenceArea.setFont(new Font("Monospaced", Font.PLAIN, 11));
+            divergenceArea.setBackground(new Color(255, 248, 225)); // Light amber
+            divergenceArea.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+
+            JScrollPane divergenceScroll = new JScrollPane(divergenceArea);
+            divergenceScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
+            divergenceScroll.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createTitledBorder("Unpushed Production Commits"),
+                BorderFactory.createLineBorder(new Color(255, 193, 7), 1)
+            ));
+            // Cap the height so a long hotfix backlog cannot push the checklist off screen.
+            divergenceScroll.setPreferredSize(new Dimension(460, 130));
+            divergenceScroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, 130));
+
+            mainPanel.add(divergenceScroll);
             mainPanel.add(Box.createVerticalStrut(15));
         }
 

@@ -4,14 +4,21 @@ import com.axone_io.ignition.git.dto.ProductionModeConfig;
 import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.Status;
+import org.eclipse.jgit.lib.BranchTrackingStatus;
+import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.lib.RepositoryState;
+import org.eclipse.jgit.revwalk.RevCommit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 /**
@@ -65,9 +72,9 @@ public class ProductionModeManager {
             }
 
             // Check repository safety first
-            if (!isRepositorySafe(git.getRepository())) {
-                String warning = "Production mode: Repository is not in a safe state for pull. " +
-                        "Resolve uncommitted changes or incomplete merge/rebase before proceeding.";
+            String unsafeReason = describeUnsafeState(git.getRepository());
+            if (unsafeReason != null) {
+                String warning = "Production mode: cannot pull because " + unsafeReason;
                 logger.warn(warning);
                 config.setWarningMessage(warning);
                 config.setValid(false);
@@ -106,6 +113,14 @@ public class ProductionModeManager {
                 }
             }
 
+            // Advisory: the gateway may be carrying a hotfix commit the remote has never seen.
+            // This does not block the pull — see describeUnpushedProductionCommits.
+            String divergence = describeUnpushedProductionCommits(git, productionBranch);
+            if (divergence != null) {
+                logger.warn("Production mode: {}", divergence);
+                config.setWarningMessage("Production mode: " + divergence);
+            }
+
             logger.info("Production mode validation passed for pull operation");
             return true;
 
@@ -137,9 +152,9 @@ public class ProductionModeManager {
             }
 
             // Check repository safety first — this is a hard block
-            if (!isRepositorySafe(git.getRepository())) {
-                String warning = "Production mode: Repository is not in a safe state for push. " +
-                        "Resolve uncommitted changes or incomplete merge/rebase before proceeding.";
+            String unsafeReason = describeUnsafeState(git.getRepository());
+            if (unsafeReason != null) {
+                String warning = "Production mode: cannot push because " + unsafeReason;
                 logger.warn(warning);
                 config.setWarningMessage(warning);
                 config.setValid(false);
@@ -170,6 +185,92 @@ public class ProductionModeManager {
             config.setValid(false);
             config.setValidationMessage("Error during validation: " + e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Maximum number of unpushed commits named in a divergence message.
+     */
+    private static final int MAX_REPORTED_COMMITS = 10;
+
+    /**
+     * Describe commits on the production branch that are not yet on its remote-tracking branch,
+     * or return {@code null} if there are none.
+     *
+     * <p>This is the normal state immediately after a hotfix: the pipeline pushes only the
+     * {@code hotfix/*} branch and merges it into the local production branch, so the gateway runs
+     * a commit that reaches the shared branch only when someone merges the pull request. Until
+     * that happens the gateway is running code that exists in no shared branch, and nothing else
+     * in the module notices.</p>
+     *
+     * <p>Deliberately advisory, never a block. If the pull request is squash-merged the remote
+     * gets an equivalent commit with a different hash, so this branch stays permanently "ahead" —
+     * blocking on that condition would strand the gateway.</p>
+     *
+     * <p>Returns {@code null} when the branch has no upstream configured (nothing to diverge
+     * from) or is merely behind the remote, which is what pull is for.</p>
+     *
+     * <p><strong>Freshness:</strong> the comparison is against the remote-tracking ref, so it is
+     * only as current as the last fetch. A pull request merged since then still reads as
+     * unpushed until the gateway fetches, which is why the message says "as of the last fetch"
+     * and why this is advisory rather than a gate.</p>
+     */
+    public static String describeUnpushedProductionCommits(Git git, String productionBranch) {
+        if (productionBranch == null || productionBranch.isEmpty()) {
+            return null;
+        }
+
+        try {
+            Repository repository = git.getRepository();
+
+            BranchTrackingStatus status = BranchTrackingStatus.of(repository, productionBranch);
+            if (status == null || status.getAheadCount() == 0) {
+                // No upstream configured, or nothing local that the remote lacks.
+                return null;
+            }
+
+            String trackingBranch = status.getRemoteTrackingBranch();
+            ObjectId localTip = repository.resolve(productionBranch);
+            ObjectId remoteTip = repository.resolve(trackingBranch);
+            if (localTip == null || remoteTip == null) {
+                return null;
+            }
+
+            List<String> lines = new ArrayList<>();
+            int total = 0;
+            for (RevCommit commit : git.log().addRange(remoteTip, localTip).call()) {
+                total++;
+                if (lines.size() < MAX_REPORTED_COMMITS) {
+                    lines.add("  • " + commit.abbreviate(7).name() + "  " + commit.getShortMessage());
+                }
+            }
+            if (total == 0) {
+                return null;
+            }
+
+            String shortTrackingName = Repository.shortenRefName(trackingBranch);
+            StringBuilder sb = new StringBuilder();
+            sb.append("local '").append(productionBranch).append("' has ")
+              .append(total).append(total == 1 ? " commit" : " commits")
+              .append(" not on ").append(shortTrackingName)
+              .append(" (as of the last fetch):\n");
+            for (String line : lines) {
+                sb.append(line).append('\n');
+            }
+            if (total > lines.size()) {
+                sb.append("  … and ").append(total - lines.size()).append(" more\n");
+            }
+            sb.append("\nA hotfix pull request may still be open. Merging it — or pushing '")
+              .append(productionBranch)
+              .append("' — realigns this gateway with the remote. Pulling first may create divergent history.");
+
+            return sb.toString();
+
+        } catch (Exception e) {
+            // Advisory only: a failure to determine divergence must never break the operation.
+            logger.warn("Could not determine whether '{}' has unpushed commits: {}",
+                    productionBranch, e.getMessage());
+            return null;
         }
     }
 
@@ -273,36 +374,100 @@ public class ProductionModeManager {
      * special state (e.g., merging, rebasing, cherry-picking).
      */
     public static boolean isRepositorySafe(Repository repository) {
+        return describeUnsafeState(repository) == null;
+    }
+
+    /**
+     * Maximum number of offending paths named in an unsafe-state message. Beyond this the
+     * message summarises the remainder rather than dumping an unreadable wall of paths.
+     */
+    private static final int MAX_REPORTED_PATHS = 10;
+
+    /**
+     * Explain why the repository is unsafe for production operations, or return {@code null}
+     * if it is safe.
+     *
+     * <p>Callers put this string in front of the user, so it names the offending paths. Knowing
+     * <em>that</em> the working tree is dirty is not actionable on a gateway you have to SSH into
+     * to inspect; knowing <em>which</em> files are dirty is.</p>
+     *
+     * <p>A repository is unsafe if it has uncommitted changes to tracked files or is in a special
+     * state (merging, rebasing, cherry-picking). Untracked files are intentionally ignored, since
+     * Ignition may create temporary files in the project directory.</p>
+     */
+    public static String describeUnsafeState(Repository repository) {
         try {
             logger.debug("Checking repository safety for production operations");
 
-            // Check repository state (merging, rebasing, etc.)
             RepositoryState state = repository.getRepositoryState();
             if (state != RepositoryState.SAFE) {
                 logger.warn("Repository is in an unsafe state for production operations: {}", state);
-                return false;
+                return "the repository is in the " + state.name() + " state (an unfinished merge, "
+                        + "rebase or cherry-pick). Finish or abort it before proceeding.";
             }
 
-            // Check for uncommitted changes (untracked files are ignored as Ignition
-            // may create temporary files in the project directory)
             try (Git git = new Git(repository)) {
                 Status status = git.status().call();
 
                 if (status.hasUncommittedChanges()) {
-                    logger.warn("Repository has uncommitted changes — unsafe for production operations. " +
-                            "Modified: {}, Added: {}, Removed: {}",
+                    Set<String> paths = new TreeSet<>();
+                    addPaths(paths, status.getConflicting());
+                    addPaths(paths, status.getChanged());
+                    addPaths(paths, status.getModified());
+                    addPaths(paths, status.getAdded());
+                    addPaths(paths, status.getRemoved());
+                    addPaths(paths, status.getMissing());
+
+                    logger.warn("Repository has uncommitted changes — unsafe for production operations. "
+                                    + "Modified: {}, Added: {}, Removed: {}, Missing: {}, Conflicting: {}",
                             status.getModified().size(),
                             status.getAdded().size(),
-                            status.getRemoved().size());
-                    return false;
+                            status.getRemoved().size(),
+                            status.getMissing().size(),
+                            status.getConflicting().size());
+
+                    return "the repository has " + paths.size() + " uncommitted change(s):\n"
+                            + formatPaths(paths)
+                            + "\nCommit or discard them before proceeding.";
                 }
             }
 
             logger.debug("Repository is safe for production operations");
-            return true;
+            return null;
         } catch (Exception e) {
             logger.error("Error checking repository safety", e);
-            return false;
+            return "the repository state could not be verified: " + e.getMessage();
         }
+    }
+
+    /**
+     * Collect paths for reporting, deduplicated and sorted across every status.
+     *
+     * <p>A {@link TreeSet} rather than sort-per-status: the message does not label which status
+     * each path came from, so per-status ordering is invisible and just reads as an unsorted
+     * list. One global alphabetical order is scannable, and stays stable as files move between
+     * statuses.</p>
+     */
+    private static void addPaths(Set<String> target, Set<String> paths) {
+        if (paths == null) {
+            return;
+        }
+        target.addAll(paths);
+    }
+
+    private static String formatPaths(Collection<String> paths) {
+        StringBuilder sb = new StringBuilder();
+        int shown = 0;
+        for (String path : paths) {
+            if (shown == MAX_REPORTED_PATHS) {
+                break;
+            }
+            sb.append("  • ").append(path).append('\n');
+            shown++;
+        }
+        if (paths.size() > shown) {
+            sb.append("  … and ").append(paths.size() - shown).append(" more\n");
+        }
+        return sb.toString();
     }
 }

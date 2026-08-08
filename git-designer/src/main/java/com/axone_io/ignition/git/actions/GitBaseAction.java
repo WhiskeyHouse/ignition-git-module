@@ -107,6 +107,14 @@ public class GitBaseAction extends BaseAction {
             // immediately instead of leaving it as a separate manual step. Commits on the
             // production branch never reach here — hotfix detection routes them to the
             // hotfix pipeline, which pushes on its own.
+            //
+            // The gateway hard-blocks pushes from a repository with uncommitted changes, so
+            // committing only a subset of the changes leaves the push blocked. That is an
+            // expected outcome, not a crash: report it as such, and make it unmistakable that
+            // the commit itself succeeded. The gateway is the single authority on repository
+            // safety — pre-checking here would duplicate that logic and get it wrong, since
+            // untracked files count as uncommitted changes in the Designer's view but are
+            // deliberately ignored by the safety check.
             try {
                 if (rpc.getProductionModeConfig(projectName).isProductionMode()) {
                     rpc.push(projectName, userName);
@@ -114,7 +122,10 @@ public class GitBaseAction extends BaseAction {
                 }
             } catch (Exception pushEx) {
                 logger.error("Auto-push after commit failed", pushEx);
-                message += "\nCommit succeeded, but automatic push failed:\n" + pushEx.getMessage();
+                // "did not run" would be a claim we cannot support: the push may have failed
+                // after partially updating the remote.
+                message += "\n\nThe commit succeeded, but the automatic push failed or could not "
+                        + "be confirmed:\n\n" + rootMessage(pushEx);
                 messageType = JOptionPane.WARNING_MESSAGE;
             }
 
@@ -125,6 +136,40 @@ public class GitBaseAction extends BaseAction {
             ErrorUtil.showError(ex);
         }
     }
+
+    /**
+     * Extract the message a user should actually read out of a nested RPC failure.
+     *
+     * <p>Gateway validation failures arrive wrapped in {@code ExecutionException} /
+     * {@code RuntimeException} layers, and carry a leading {@code [Production Git Operation]}
+     * log tag that means nothing to the person reading the dialog. Unwrap to the root cause
+     * and drop that tag.</p>
+     *
+     * <p>Only that exact tag is stripped. Stripping any leading {@code [...]} would eat
+     * meaningful git output — {@code [rejected]} on a non-fast-forward push being the obvious
+     * one to lose.</p>
+     */
+    public static String rootMessage(Throwable t) {
+        Throwable root = t;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+
+        String message = root.getMessage();
+        if (message == null) {
+            return root.getClass().getSimpleName();
+        }
+
+        message = message.trim();
+        if (message.startsWith(PRODUCTION_LOG_TAG)) {
+            message = message.substring(PRODUCTION_LOG_TAG.length()).trim();
+        }
+        // Checked after stripping, so a message that was nothing but the tag still falls back.
+        return message.isEmpty() ? root.getClass().getSimpleName() : message;
+    }
+
+    /** Internal log tag the gateway prefixes to production guard failures. */
+    private static final String PRODUCTION_LOG_TAG = "[Production Git Operation]";
 
     public static void handlePullAction(boolean importTags, boolean importTheme, boolean importImages) {
         String message = BundleUtil.get().getStringLenient(GitActionType.PULL.baseBundleKey + ".ConfirmMessage");
