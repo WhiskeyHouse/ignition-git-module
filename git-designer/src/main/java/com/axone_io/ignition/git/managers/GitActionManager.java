@@ -181,7 +181,14 @@ public class GitActionManager {
             protected Object[] doInBackground() throws Exception {
                 ProductionModeConfig config = rpc.getProductionModeConfig(projectName);
                 String currentBranch = rpc.getCurrentBranch(projectName);
-                return new Object[]{config, currentBranch};
+                // Advisory only — a failure here must not stop the user from pulling.
+                String divergence = null;
+                try {
+                    divergence = rpc.getUnpushedProductionCommits(projectName);
+                } catch (Exception e) {
+                    logger.warn("Could not check for unpushed production commits", e);
+                }
+                return new Object[]{config, currentBranch, divergence};
             }
 
             @Override
@@ -190,6 +197,7 @@ public class GitActionManager {
                     Object[] results = get();
                     ProductionModeConfig prodConfig = (ProductionModeConfig) results[0];
                     String currentBranch = (String) results[1];
+                    String divergence = (String) results[2];
 
                     // Block pull on hotfix branches
                     if (currentBranch != null && currentBranch.startsWith("hotfix/")) {
@@ -206,7 +214,11 @@ public class GitActionManager {
                     if (prodConfig.isProductionMode()) {
                         logger.info("Production mode is active for project: " + projectName);
 
-                        new ProductionModePopup(context.getFrame(), prodConfig, "Pull from Git") {
+                        if (divergence != null) {
+                            logger.warn("Pull requested while production branch has unpushed commits: {}", divergence);
+                        }
+
+                        new ProductionModePopup(context.getFrame(), prodConfig, "Pull from Git", divergence) {
                             @Override
                             public void onProceed() {
                                 // User confirmed, show regular pull popup

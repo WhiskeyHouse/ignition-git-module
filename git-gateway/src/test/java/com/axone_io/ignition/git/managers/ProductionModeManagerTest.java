@@ -428,4 +428,141 @@ public class ProductionModeManagerTest {
         assertTrue(ProductionModeManager.validatePush(git, config, "hotfix/fix-pump-alarm"));
         assertFalse(config.hasWarnings());
     }
+
+    // --- Unpushed production commit (divergence) tests ---
+
+    /**
+     * Wire the test repo up to a throwaway bare remote and get {@code main} in sync with it,
+     * so that later local commits make the branch genuinely "ahead".
+     */
+    private void setUpRemote() throws Exception {
+        File remoteDir = tempFolder.newFolder("remote-repo.git");
+        Git.init().setBare(true).setDirectory(remoteDir).call().close();
+
+        StoredConfig cfg = repository.getConfig();
+        cfg.setString("remote", "origin", "url", remoteDir.getAbsolutePath());
+        cfg.setString("remote", "origin", "fetch", "+refs/heads/*:refs/remotes/origin/*");
+        cfg.setString("branch", "main", "remote", "origin");
+        cfg.setString("branch", "main", "merge", "refs/heads/main");
+        cfg.save();
+
+        git.push().setRemote("origin").add("main").call();
+        git.fetch().setRemote("origin").call();
+    }
+
+    /** Commit a new tracked file so HEAD advances past the remote-tracking ref. */
+    private void commitLocally(String fileName, String message) throws Exception {
+        Files.writeString(new File(repository.getWorkTree(), fileName).toPath(), "content");
+        git.add().addFilepattern(fileName).call();
+        git.commit().setMessage(message).call();
+    }
+
+    @Test
+    public void describeUnpushedProductionCommits_noRemoteConfigured_returnsNull() {
+        // A repo with no remote cannot be diverged from one.
+        assertNull(ProductionModeManager.describeUnpushedProductionCommits(git, "main"));
+    }
+
+    @Test
+    public void describeUnpushedProductionCommits_inSyncWithRemote_returnsNull() throws Exception {
+        setUpRemote();
+        assertNull(ProductionModeManager.describeUnpushedProductionCommits(git, "main"));
+    }
+
+    @Test
+    public void describeUnpushedProductionCommits_aheadOfRemote_namesTheCommit() throws Exception {
+        setUpRemote();
+        commitLocally("hotfix.txt", "Fix pump 3 alarm threshold");
+
+        String reason = ProductionModeManager.describeUnpushedProductionCommits(git, "main");
+
+        assertNotNull(reason);
+        assertTrue("expected a count in: " + reason, reason.contains("1 commit"));
+        // The whole point: name what is unpushed, so the engineer can find the open PR.
+        assertTrue("expected the subject in: " + reason,
+                reason.contains("Fix pump 3 alarm threshold"));
+    }
+
+    @Test
+    public void describeUnpushedProductionCommits_severalAhead_reportsFullCount() throws Exception {
+        setUpRemote();
+        commitLocally("a.txt", "First hotfix");
+        commitLocally("b.txt", "Second hotfix");
+
+        String reason = ProductionModeManager.describeUnpushedProductionCommits(git, "main");
+
+        assertNotNull(reason);
+        assertTrue("expected a count in: " + reason, reason.contains("2 commit"));
+        assertTrue(reason.contains("First hotfix"));
+        assertTrue(reason.contains("Second hotfix"));
+    }
+
+    @Test
+    public void describeUnpushedProductionCommits_behindRemoteOnly_returnsNull() throws Exception {
+        setUpRemote();
+        // Advance the remote past us, leaving local strictly behind — that is what pull is for,
+        // not something to warn about.
+        File otherDir = tempFolder.newFolder("other-clone");
+        try (Git other = Git.cloneRepository()
+                .setURI(repository.getConfig().getString("remote", "origin", "url"))
+                .setDirectory(otherDir).call()) {
+            StoredConfig otherCfg = other.getRepository().getConfig();
+            otherCfg.setBoolean("commit", null, "gpgSign", false);
+            otherCfg.save();
+            Files.writeString(new File(otherDir, "remote-change.txt").toPath(), "x");
+            other.add().addFilepattern("remote-change.txt").call();
+            other.commit().setMessage("Change made elsewhere").call();
+            other.push().call();
+        }
+        git.fetch().setRemote("origin").call();
+
+        assertNull(ProductionModeManager.describeUnpushedProductionCommits(git, "main"));
+    }
+
+    @Test
+    public void describeUnpushedProductionCommits_notOnProductionBranch_returnsNull() throws Exception {
+        setUpRemote();
+        commitLocally("hotfix.txt", "Fix pump 3 alarm threshold");
+        git.branchCreate().setName("hotfix/fix-pump-alarm").call();
+        git.checkout().setName("hotfix/fix-pump-alarm").call();
+
+        // Asked about a branch we are not on; the check is scoped to the production branch only.
+        assertNull(ProductionModeManager.describeUnpushedProductionCommits(git, "release"));
+    }
+
+    @Test
+    public void validatePull_aheadOfRemote_allowsPullButWarns() throws Exception {
+        setUpRemote();
+        commitLocally("hotfix.txt", "Fix pump 3 alarm threshold");
+
+        ProductionModeConfig config = new ProductionModeConfig(true, "main", null);
+
+        // Divergence must never strand a production gateway: pull still allowed.
+        assertTrue(ProductionModeManager.validatePull(git, config));
+        assertTrue("expected a warning, got: " + config.getWarningMessage(), config.hasWarnings());
+        assertTrue("expected the subject in: " + config.getWarningMessage(),
+                config.getWarningMessage().contains("Fix pump 3 alarm threshold"));
+    }
+
+    @Test
+    public void validatePull_inSyncWithRemote_noWarning() throws Exception {
+        setUpRemote();
+
+        ProductionModeConfig config = new ProductionModeConfig(true, "main", null);
+        assertTrue(ProductionModeManager.validatePull(git, config));
+        assertFalse(config.hasWarnings());
+    }
+
+    @Test
+    public void validatePull_unsafeRepoAndAhead_reportsBlockNotDivergence() throws Exception {
+        setUpRemote();
+        commitLocally("hotfix.txt", "Fix pump 3 alarm threshold");
+        Files.writeString(new File(repository.getWorkTree(), "README.md").toPath(), "dirty");
+
+        ProductionModeConfig config = new ProductionModeConfig(true, "main", null);
+
+        // A hard block outranks an advisory warning — the user needs the actionable one.
+        assertFalse(ProductionModeManager.validatePull(git, config));
+        assertTrue(config.getWarningMessage().contains("uncommitted change(s)"));
+    }
 }

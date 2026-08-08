@@ -296,6 +296,44 @@ graph LR
 
 After the hotfix, the module merges the hotfix branch into the **local** production branch rather than pulling from the remote. This is critical: the remote production branch may contain other merged changes not intended for this gateway. The local merge only brings in the engineer's fix.
 
+### Unpushed Production Commits
+
+The pipeline pushes only the `hotfix/*` branch. The local production branch is never pushed, so
+after a hotfix the gateway is **one commit ahead of the remote** until someone merges the pull
+request. Until that happens, the gateway is running code that exists in no shared branch.
+
+Production mode surfaces this rather than assuming the PR gets merged:
+
+- **Pull in production mode** shows an amber *Unpushed Production Commits* panel in the safety
+  dialog, naming each commit (short hash + subject) that the remote has not seen.
+- The same text is logged at `WARN` on the gateway.
+- It is available over RPC as `getUnpushedProductionCommits(projectName)`, which returns `null`
+  when there is nothing to report. (Not currently part of the curated `system.git.*` facade.)
+
+**This is advisory and never blocks a pull.** Two reasons:
+
+1. Being ahead is the *expected* state right after a hotfix, not an error.
+2. If the PR is squash-merged, the remote gets an equivalent commit with a **different hash**, so
+   the branch reads as permanently ahead. Blocking on that would strand the gateway.
+
+> **Freshness caveat:** the comparison is against the remote-tracking ref, so it is only as current
+> as the last fetch — hence the "as of the last fetch" wording in the message. A PR merged since
+> the last fetch still reads as unpushed until the gateway fetches again.
+
+#### Recommended repository setting
+
+For repositories backing a production gateway, prefer **merge commits** (or rebase) over
+**squash** when merging hotfix PRs:
+
+| GitHub merge button | Lands on the remote | Next gateway pull |
+|---|---|---|
+| Merge commit | The exact hotfix commit hash | Clean fast-forward |
+| Squash | A new commit, same content, new hash | Histories permanently forked |
+| Rebase | Rewritten hash | Histories permanently forked |
+
+With a merge commit the gateway's history reconciles cleanly on the next pull and the advisory
+clears itself.
+
 ### Hotfix Branch Rules
 
 When on a `hotfix/*` branch, production mode behavior changes:

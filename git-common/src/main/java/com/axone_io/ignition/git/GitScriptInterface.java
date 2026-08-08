@@ -51,6 +51,12 @@ public interface GitScriptInterface {
 
     // Production mode operations
     ProductionModeConfig getProductionModeConfig(String projectName) throws Exception;
+
+    /**
+     * Describe commits on the production branch that have not reached the remote (typically an
+     * unmerged hotfix), or {@code null} when there are none. Advisory only — never blocks.
+     */
+    String getUnpushedProductionCommits(String projectName) throws Exception;
     boolean validateProductionModePull(String projectName, String userName) throws Exception;
     boolean validateProductionModePush(String projectName, String userName, String targetBranch) throws Exception;
     List<String> listRepositoryTags(String projectName) throws Exception;

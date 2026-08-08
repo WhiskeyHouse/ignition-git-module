@@ -145,6 +145,11 @@ public class ClientScriptModule extends AbstractScriptModule {
     }
 
     @Override
+    protected String getUnpushedProductionCommitsImpl(String projectName) throws Exception {
+        return rpc.getUnpushedProductionCommits(projectName);
+    }
+
+    @Override
     protected boolean validateProductionModePullImpl(String projectName, String userName) throws Exception {
         return rpc.validateProductionModePull(projectName, userName);
     }
