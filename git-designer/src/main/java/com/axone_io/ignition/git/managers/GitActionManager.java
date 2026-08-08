@@ -384,19 +384,34 @@ public class GitActionManager {
      * Ask the user to authorise a production save and collect the commit details up front.
      *
      * <p>Called from {@code DesignerHook.notifyProjectSaveStart}, which is the only point at
-     * which Ignition lets a module abort a save. Returning {@code null} means the user backed
-     * out of one of the dialogs and the save must not proceed.</p>
+     * which Ignition lets a module abort a save.</p>
+     *
+     * <p>Returns {@code null} when the user backed out of one of the dialogs. Throws when the
+     * gate cannot be evaluated at all — the save must not proceed in either case, but only the
+     * first is the user's decision, and they get different messages.</p>
      *
      * <p>Safe to call from the save worker thread — the dialogs are run on the EDT and waited on.</p>
      */
     public static PendingProductionCommit promptForProductionSave(String projectName, String userName,
-                                                                  ProductionModeConfig config) {
+                                                                  ProductionModeConfig config)
+            throws Exception {
         String currentBranch;
         try {
             currentBranch = rpc.getCurrentBranch(projectName);
         } catch (Exception e) {
-            logger.warn("Unable to determine current branch before save: {}", e.getMessage());
-            currentBranch = null;
+            // Hotfix detection is branch equality, so an unknown branch would silently compare
+            // unequal and route a production-branch save down the plain commit + auto-push path,
+            // skipping the branch/PR/merge pipeline entirely. Abort rather than guess.
+            //
+            // Thrown rather than returned as null so this stays distinguishable from the user
+            // declining the dialogs — both cancel the save, but only one of them is the user's
+            // decision, and the message they see should say which.
+            logger.warn("Unable to determine current branch before save; cancelling the save: {}",
+                    e.getMessage());
+            throw new Exception(
+                    "Save cancelled — could not determine the repository's current branch, so the "
+                            + "module cannot tell whether this is a hotfix to the production branch. "
+                            + "Your changes have not been saved. Cause: " + e.getMessage(), e);
         }
 
         Object[][] changeData = getProductionSaveChangeData(projectName, userName);
