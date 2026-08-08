@@ -173,6 +173,11 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
     }
 
     @Override
+    public String getUnpushedProductionCommits(String projectName) throws Exception {
+        return getUnpushedProductionCommitsImpl(projectName);
+    }
+
+    @Override
     public boolean validateProductionModePull(String projectName,
                                                String userName) throws Exception {
         return validateProductionModePullImpl(projectName, userName);
@@ -248,6 +253,7 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
     protected abstract List<String> getGitTrackedProjectNamesImpl();
     protected abstract List<String> listDocsForResourceImpl(String projectName, String resourcePath) throws Exception;
     protected abstract ProductionModeConfig getProductionModeConfigImpl(String projectName) throws Exception;
+    protected abstract String getUnpushedProductionCommitsImpl(String projectName) throws Exception;
     protected abstract boolean validateProductionModePullImpl(String projectName, String userName) throws Exception;
     protected abstract boolean validateProductionModePushImpl(String projectName, String userName, String targetBranch) throws Exception;
     protected abstract List<String> listRepositoryTagsImpl(String projectName) throws Exception;

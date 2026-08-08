@@ -4,9 +4,12 @@ import com.axone_io.ignition.git.dto.ProductionModeConfig;
 import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.Status;
+import org.eclipse.jgit.lib.BranchTrackingStatus;
+import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.lib.RepositoryState;
+import org.eclipse.jgit.revwalk.RevCommit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -110,6 +113,14 @@ public class ProductionModeManager {
                 }
             }
 
+            // Advisory: the gateway may be carrying a hotfix commit the remote has never seen.
+            // This does not block the pull — see describeUnpushedProductionCommits.
+            String divergence = describeUnpushedProductionCommits(git, productionBranch);
+            if (divergence != null) {
+                logger.warn("Production mode: {}", divergence);
+                config.setWarningMessage("Production mode: " + divergence);
+            }
+
             logger.info("Production mode validation passed for pull operation");
             return true;
 
@@ -174,6 +185,92 @@ public class ProductionModeManager {
             config.setValid(false);
             config.setValidationMessage("Error during validation: " + e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Maximum number of unpushed commits named in a divergence message.
+     */
+    private static final int MAX_REPORTED_COMMITS = 10;
+
+    /**
+     * Describe commits on the production branch that are not yet on its remote-tracking branch,
+     * or return {@code null} if there are none.
+     *
+     * <p>This is the normal state immediately after a hotfix: the pipeline pushes only the
+     * {@code hotfix/*} branch and merges it into the local production branch, so the gateway runs
+     * a commit that reaches the shared branch only when someone merges the pull request. Until
+     * that happens the gateway is running code that exists in no shared branch, and nothing else
+     * in the module notices.</p>
+     *
+     * <p>Deliberately advisory, never a block. If the pull request is squash-merged the remote
+     * gets an equivalent commit with a different hash, so this branch stays permanently "ahead" —
+     * blocking on that condition would strand the gateway.</p>
+     *
+     * <p>Returns {@code null} when the branch has no upstream configured (nothing to diverge
+     * from) or is merely behind the remote, which is what pull is for.</p>
+     *
+     * <p><strong>Freshness:</strong> the comparison is against the remote-tracking ref, so it is
+     * only as current as the last fetch. A pull request merged since then still reads as
+     * unpushed until the gateway fetches, which is why the message says "as of the last fetch"
+     * and why this is advisory rather than a gate.</p>
+     */
+    public static String describeUnpushedProductionCommits(Git git, String productionBranch) {
+        if (productionBranch == null || productionBranch.isEmpty()) {
+            return null;
+        }
+
+        try {
+            Repository repository = git.getRepository();
+
+            BranchTrackingStatus status = BranchTrackingStatus.of(repository, productionBranch);
+            if (status == null || status.getAheadCount() == 0) {
+                // No upstream configured, or nothing local that the remote lacks.
+                return null;
+            }
+
+            String trackingBranch = status.getRemoteTrackingBranch();
+            ObjectId localTip = repository.resolve(productionBranch);
+            ObjectId remoteTip = repository.resolve(trackingBranch);
+            if (localTip == null || remoteTip == null) {
+                return null;
+            }
+
+            List<String> lines = new ArrayList<>();
+            int total = 0;
+            for (RevCommit commit : git.log().addRange(remoteTip, localTip).call()) {
+                total++;
+                if (lines.size() < MAX_REPORTED_COMMITS) {
+                    lines.add("  • " + commit.abbreviate(7).name() + "  " + commit.getShortMessage());
+                }
+            }
+            if (total == 0) {
+                return null;
+            }
+
+            String shortTrackingName = Repository.shortenRefName(trackingBranch);
+            StringBuilder sb = new StringBuilder();
+            sb.append("local '").append(productionBranch).append("' has ")
+              .append(total).append(total == 1 ? " commit" : " commits")
+              .append(" not on ").append(shortTrackingName)
+              .append(" (as of the last fetch):\n");
+            for (String line : lines) {
+                sb.append(line).append('\n');
+            }
+            if (total > lines.size()) {
+                sb.append("  … and ").append(total - lines.size()).append(" more\n");
+            }
+            sb.append("\nA hotfix pull request may still be open. Merging it — or pushing '")
+              .append(productionBranch)
+              .append("' — realigns this gateway with the remote. Pulling first may create divergent history.");
+
+            return sb.toString();
+
+        } catch (Exception e) {
+            // Advisory only: a failure to determine divergence must never break the operation.
+            logger.warn("Could not determine whether '{}' has unpushed commits: {}",
+                    productionBranch, e.getMessage());
+            return null;
         }
     }
 

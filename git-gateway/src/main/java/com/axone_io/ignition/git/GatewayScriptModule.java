@@ -991,6 +991,23 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     }
 
     @Override
+    protected String getUnpushedProductionCommitsImpl(String projectName) throws Exception {
+        GitProjectsConfigRecord config = GitManager.getGitProjectConfigRecord(projectName);
+        if (config == null || !config.getProductionMode()) {
+            return null;
+        }
+
+        String productionBranch = config.getProductionBranch();
+        if (productionBranch == null || productionBranch.isEmpty()) {
+            productionBranch = "main";
+        }
+
+        try (Git git = getGit(getProjectFolderPath(projectName))) {
+            return ProductionModeManager.describeUnpushedProductionCommits(git, productionBranch);
+        }
+    }
+
+    @Override
     protected boolean validateProductionModePullImpl(String projectName, String userName) throws Exception {
         logger.info("[Production Git Operation] Validating PULL for user '" + userName + "', project: " + projectName);
 
