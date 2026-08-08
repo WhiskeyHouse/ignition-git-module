@@ -65,8 +65,33 @@ public class GitCommissioningUtils {
         m.put("production_branch", "production_branch");
         m.put("production_tagPattern", "production_tagPattern");
         m.put("tags_importOnStartup", "tags_importOnStartup");
-        m.put("initDefaultBranch", "initDefaultBranch");
         YAML_KEY_TO_FIELD = Collections.unmodifiableMap(m);
+    }
+
+    /**
+     * git.yaml keys that were once accepted but never had any effect, mapped to the
+     * explanation logged when one is encountered.
+     *
+     * <p>Unmapped keys hard-fail commissioning by design (see {@link #parseYaml}), which is
+     * right for typos but wrong for a key that shipped, was documented, and sits in live
+     * git.yaml files. Retiring a key here removes the dead plumbing behind it without
+     * breaking the gateways that still declare it — they get a warning instead of a
+     * gateway that will not commission.</p>
+     */
+    public static final Map<String, String> RETIRED_YAML_KEYS;
+    static {
+        Map<String, String> m = new LinkedHashMap<>();
+        m.put("initDefaultBranch",
+                "it never had any effect. Repositories created by this module are initialised on "
+                        + "'master' (JGit's default) regardless of this setting. Set 'production_branch' "
+                        + "to the branch the repository is actually on, or rename the branch on the "
+                        + "remote and re-clone. This key can be removed from git.yaml.");
+        RETIRED_YAML_KEYS = Collections.unmodifiableMap(m);
+    }
+
+    /** True if the key is accepted for backwards compatibility but intentionally ignored. */
+    public static boolean isRetiredYamlKey(String yamlKey) {
+        return RETIRED_YAML_KEYS.containsKey(yamlKey);
     }
 
     public static GitCommissioningConfig config;
@@ -323,6 +348,15 @@ public class GitCommissioningUtils {
 
                     // Iterate over each entry in the YAML map
                     for (Map.Entry<String, Object> entry : item.entrySet()) {
+                        // Retired keys are tolerated but ignored. They must be handled before the
+                        // reflection below, which would otherwise hard-fail commissioning on a
+                        // git.yaml that is merely out of date rather than wrong.
+                        if (isRetiredYamlKey(entry.getKey())) {
+                            logger.warn("Ignoring retired git.yaml key '" + entry.getKey() + "': "
+                                    + RETIRED_YAML_KEYS.get(entry.getKey()));
+                            continue;
+                        }
+
                         try {
                             // Convert YAML key to field name
                             String fieldName = yamlKeyToFieldName(entry.getKey());
@@ -445,6 +479,12 @@ public class GitCommissioningUtils {
         String mapped = YAML_KEY_TO_FIELD.get(yamlKey);
         if (mapped != null) {
             return mapped;
+        }
+        if (isRetiredYamlKey(yamlKey)) {
+            throw new IllegalArgumentException(
+                    "git.yaml key '" + yamlKey + "' is retired and has no backing field: "
+                            + RETIRED_YAML_KEYS.get(yamlKey)
+                            + " Callers should skip retired keys (see GitCommissioningUtils.isRetiredYamlKey).");
         }
         throw new IllegalArgumentException(
                 "Unknown git.yaml key '" + yamlKey + "'. "

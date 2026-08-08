@@ -183,7 +183,6 @@ The module supports automated project commissioning via Docker Compose. Place a 
   commissioning_importThemes: true
   commissioning_importTags: true
   commissioning_importImages: true
-  initDefaultBranch: main
 - repo_uri: https://github.com/exampleUser/my-repo.git
   repo_branch: development
   ignition_projectName: childProject
@@ -197,6 +196,19 @@ The module supports automated project commissioning via Docker Compose. Place a 
   commissioning_importTags: true
   commissioning_importImages: true
 ```
+
+### Which branch a new repository starts on
+
+When the remote is empty, the module initialises the repository with JGit's default
+branch: **`master`**. This is not configurable — set `production_branch` (and
+`repo_branch`) to `master` for such projects, or rename the branch on the remote and
+let the module clone it instead.
+
+`initDefaultBranch` is a **retired** key. It was accepted and documented but never had
+any effect. It is still tolerated in `git.yaml` so existing deployments keep
+commissioning; the gateway logs a warning naming it, and it can be deleted. Note that
+if `production_branch` does not match the repository's actual branch, production mode
+silently stops detecting hotfixes — no warning, no dialog, no pipeline.
 
 ### Automatic tag re-import on restart
 
