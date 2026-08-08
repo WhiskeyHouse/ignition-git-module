@@ -2,7 +2,9 @@ package com.axone_io.ignition.git.commissioning.utils;
 
 import com.axone_io.ignition.git.commissioning.ProjectConfig;
 import com.axone_io.ignition.git.commissioning.ProjectConfigs;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -26,10 +28,19 @@ import static org.junit.Assert.fail;
  */
 public class RetiredYamlKeyParseTest {
 
+    /** Deletes the fixtures afterwards even when an assertion or the parser throws. */
+    @Rule
+    public TemporaryFolder tempFolder = new TemporaryFolder();
+
+    private Path writeGitYaml(String name, String... lines) throws Exception {
+        Path yaml = tempFolder.newFile(name).toPath();
+        Files.writeString(yaml, String.join("\n", lines));
+        return yaml;
+    }
+
     @Test
     public void gitYamlStillDeclaringTheRetiredKeyParsesAndKeepsEverythingElse() throws Exception {
-        Path yaml = Files.createTempFile("git-retired-key", ".yaml");
-        Files.writeString(yaml, String.join("\n",
+        Path yaml = writeGitYaml("git-retired-key.yaml",
                 "- repo_uri: https://example.invalid/repo.git",
                 "  repo_branch: main",
                 "  ignition_projectName: Proj",
@@ -40,7 +51,7 @@ public class RetiredYamlKeyParseTest {
                 "  initDefaultBranch: main",
                 "  production_mode: true",
                 "  production_branch: main",
-                ""));
+                "");
 
         ProjectConfigs configs = GitCommissioningUtils.parseYaml(yaml);
 
@@ -60,8 +71,7 @@ public class RetiredYamlKeyParseTest {
     @Test
     public void genuinelyUnknownKeysStillHardFail() throws Exception {
         // Retiring a key must not weaken the TEC-3635 guarantee that typos surface loudly.
-        Path yaml = Files.createTempFile("git-unknown-key", ".yaml");
-        Files.writeString(yaml, String.join("\n",
+        Path yaml = writeGitYaml("git-unknown-key.yaml",
                 "- repo_uri: https://example.invalid/repo.git",
                 "  repo_branch: main",
                 "  ignition_projectName: Proj",
@@ -70,7 +80,7 @@ public class RetiredYamlKeyParseTest {
                 "  user_email: someone@example.com",
                 "  user_password: placeholder",
                 "  totally_made_up_key: yes",
-                ""));
+                "");
 
         // parseYaml only catches IOException, so the reflection failure propagates.
         try {

@@ -72,11 +72,11 @@ public class GitCommissioningUtils {
      * git.yaml keys that were once accepted but never had any effect, mapped to the
      * explanation logged when one is encountered.
      *
-     * <p>Unmapped keys hard-fail commissioning by design (see {@link #parseYaml}), which is
-     * right for typos but wrong for a key that shipped, was documented, and sits in live
-     * git.yaml files. Retiring a key here removes the dead plumbing behind it without
-     * breaking the gateways that still declare it — they get a warning instead of a
-     * gateway that will not commission.</p>
+     * <p>{@link #parseYaml} hard-fails on any key absent from <em>both</em> this registry and
+     * {@link #YAML_KEY_TO_FIELD}. That is right for typos but wrong for a key that shipped, was
+     * documented, and sits in live git.yaml files. Retiring a key here removes the dead plumbing
+     * behind it without breaking the gateways that still declare it — they get a warning instead
+     * of a gateway that will not commission.</p>
      */
     public static final Map<String, String> RETIRED_YAML_KEYS;
     static {
