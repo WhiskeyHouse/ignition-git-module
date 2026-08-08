@@ -222,13 +222,14 @@ public class GitActionManager {
                             logger.warn("Pull requested while production branch has unpushed commits: {}", divergence);
                         }
 
-                        new ProductionModePopup(context.getFrame(), prodConfig, "Pull from Git", divergence) {
-                            @Override
-                            public void onProceed() {
-                                // User confirmed, show regular pull popup
-                                showPullPopupInternal(projectName, userName);
-                            }
-                        };
+                        // The constructor blocks until the modal is dismissed; open the next
+                        // window only afterwards. Doing it from inside the popup left PullPopup
+                        // stranded behind the Designer frame, so the pull looked like a no-op.
+                        ProductionModePopup checklist = new ProductionModePopup(
+                                context.getFrame(), prodConfig, "Pull from Git", divergence);
+                        if (checklist.isConfirmed()) {
+                            showPullPopupInternal(projectName, userName);
+                        }
                     } else {
                         // Not in production mode, show regular pull popup
                         showPullPopupInternal(projectName, userName);
@@ -607,35 +608,90 @@ public class GitActionManager {
         worker.execute();
     }
 
-    public static void showBranchPopup(String projectName, String userName) {
-        // Block branch switching in production mode — use the hotfix workflow instead
-        ProductionModeConfig cachedConfig = DesignerHook.getCachedProductionConfig();
-        if (cachedConfig != null && cachedConfig.isProductionMode()) {
-            // Check if already on a hotfix branch (allow viewing for context)
-            try {
-                String currentBranch = rpc.getCurrentBranch(projectName);
-                if (currentBranch != null && currentBranch.startsWith("hotfix/")) {
-                    // On a hotfix branch — allow viewing but warn
+    /**
+     * Explain why the branch popup will not open in production mode, and report the branch state
+     * it would otherwise have shown.
+     *
+     * <p>The branch popup is the only screen that reports how far ahead of the remote this gateway
+     * is, and it never opens in production mode — which left the pull-time warning about unpushed
+     * production commits with nowhere to be followed up. This reports that state rather than only
+     * refusing.</p>
+     *
+     * <p>The gateway calls happen on a worker thread: this runs from a toolbar action on the EDT,
+     * and {@code getUnpushedProductionCommits} walks a commit range.</p>
+     */
+    private static void showProductionBranchNotice(String projectName) {
+        SwingWorker<String[], Void> worker = new SwingWorker<String[], Void>() {
+            @Override
+            protected String[] doInBackground() {
+                String branch = null;
+                String divergence = null;
+                try {
+                    branch = rpc.getCurrentBranch(projectName);
+                } catch (Exception e) {
+                    logger.debug("Could not read the current branch: {}", e.getMessage());
+                }
+                try {
+                    divergence = rpc.getUnpushedProductionCommits(projectName);
+                } catch (Exception e) {
+                    // Informational only — never let this stop the guard from reporting.
+                    logger.debug("Could not describe unpushed production commits: {}", e.getMessage());
+                }
+                return new String[]{branch, divergence};
+            }
+
+            @Override
+            protected void done() {
+                String branch = null;
+                String divergence = null;
+                try {
+                    String[] r = get();
+                    branch = r[0];
+                    divergence = r[1];
+                } catch (Exception e) {
+                    logger.debug("Branch notice lookup failed: {}", e.getMessage());
+                }
+
+                // Already on a hotfix branch: that is its own situation, not a refusal.
+                if (branch != null && branch.startsWith("hotfix/")) {
                     JOptionPane.showMessageDialog(
                         context.getFrame(),
-                        "You are on hotfix branch '" + currentBranch + "'.\n" +
-                        "Complete your hotfix to return to the production branch.",
+                        "You are on hotfix branch '" + branch + "'.\n"
+                                + "Complete your hotfix to return to the production branch.",
                         "Hotfix Branch Active",
                         JOptionPane.INFORMATION_MESSAGE
                     );
                     return;
                 }
-            } catch (Exception ignored) {}
 
-            JOptionPane.showMessageDialog(
-                context.getFrame(),
-                "Branch switching is disabled in production mode.\n" +
-                "Use the hotfix workflow to make changes.\n\n" +
-                "Save your changes and commit — the hotfix workflow\n" +
-                "will handle branching automatically.",
-                "Production Mode \u2014 Branch Switching Disabled",
-                JOptionPane.WARNING_MESSAGE
-            );
+                StringBuilder notice = new StringBuilder()
+                        .append("Branch switching is disabled in production mode.\n")
+                        .append("Use the hotfix workflow to make changes.\n\n")
+                        .append("Save your changes and commit — the hotfix workflow\n")
+                        .append("will handle branching automatically.");
+                if (branch != null && !branch.isEmpty()) {
+                    notice.append("\n\nCurrent branch: ").append(branch);
+                }
+                if (divergence != null && !divergence.isEmpty()) {
+                    notice.append("\n\n").append(divergence);
+                }
+
+                JOptionPane.showMessageDialog(
+                    context.getFrame(),
+                    notice.toString(),
+                    "Production Mode — Branch Switching Disabled",
+                    JOptionPane.WARNING_MESSAGE
+                );
+            }
+        };
+        worker.execute();
+    }
+
+    public static void showBranchPopup(String projectName, String userName) {
+        // Block branch switching in production mode - use the hotfix workflow instead.
+        ProductionModeConfig cachedConfig = DesignerHook.getCachedProductionConfig();
+        if (cachedConfig != null && cachedConfig.isProductionMode()) {
+            showProductionBranchNotice(projectName);
             return;
         }
 
