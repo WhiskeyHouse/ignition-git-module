@@ -12,6 +12,8 @@ import com.axone_io.ignition.git.CommitPopup;
 import com.axone_io.ignition.git.DesignerHook;
 import com.axone_io.ignition.git.HotfixCommitDialog;
 import com.axone_io.ignition.git.HotfixProgressDialog;
+import com.axone_io.ignition.git.PendingProductionCommit;
+import com.axone_io.ignition.git.ProductionCommitDialog;
 import com.axone_io.ignition.git.ProductionModePopup;
 import com.axone_io.ignition.git.PullPopup;
 import com.axone_io.ignition.git.UncommittedChange;
@@ -22,8 +24,10 @@ import com.inductiveautomation.ignition.common.util.LoggerEx;
 
 import javax.swing.*;
 import javax.swing.SwingWorker;
+import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.awt.Desktop;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -331,6 +335,184 @@ public class GitActionManager {
         executeHotfixWithProgress(projectName, userName, description, message, changes.toArray(new String[0]));
     }
 
+    /**
+     * Build the change table shown by the production save gate.
+     *
+     * <p>Runs <em>before</em> the save, so the resources the user is about to save are not in
+     * git's working tree yet and {@code getUncommitedChanges} cannot see them. Those pending
+     * resources are appended from the Designer's own change operations and pre-selected, so the
+     * table shows everything the commit will actually contain. JGit treats each entry as a path
+     * prefix when staging, so the paths resolve correctly once the save has written them.</p>
+     */
+    public static Object[][] getProductionSaveChangeData(String projectName, String userName) {
+        List<Object[]> rows = new ArrayList<>();
+        List<String> seen = new ArrayList<>();
+        List<String> pending = getPendingResourcePaths();
+
+        List<UncommittedChange> uncommitted;
+        try {
+            uncommitted = rpc.getUncommitedChanges(projectName, userName);
+        } catch (Exception e) {
+            logger.warn("Unable to read uncommitted changes before save: {}", e.getMessage());
+            uncommitted = new ArrayList<>();
+        }
+
+        for (UncommittedChange change : uncommitted) {
+            String resource = change.getResource();
+            seen.add(resource);
+            rows.add(new Object[]{pending.contains(resource), resource, change.getType(), change.getActor()});
+        }
+
+        for (String resource : pending) {
+            if (!seen.contains(resource)) {
+                seen.add(resource);
+                rows.add(new Object[]{Boolean.TRUE, resource, "Pending save", userName});
+            }
+        }
+
+        return rows.toArray(new Object[0][]);
+    }
+
+    private static List<String> getPendingResourcePaths() {
+        List<String> paths = new ArrayList<>();
+        List<ChangeOperation> changes = DesignerHook.changes;
+        if (changes == null) {
+            return paths;
+        }
+        for (ChangeOperation c : changes) {
+            try {
+                ResourceId rid = ChangeOperation.getResourceIdFromChange(c);
+                String path = rid.getResourcePath().toString();
+                if (!paths.contains(path)) {
+                    paths.add(path);
+                }
+            } catch (Exception e) {
+                logger.debug("Skipping unreadable change operation: {}", e.getMessage());
+            }
+        }
+        return paths;
+    }
+
+    /**
+     * Ask the user to authorise a production save and collect the commit details up front.
+     *
+     * <p>Called from {@code DesignerHook.notifyProjectSaveStart}, which is the only point at
+     * which Ignition lets a module abort a save.</p>
+     *
+     * <p>Returns {@code null} when the user backed out of one of the dialogs. Throws when the
+     * gate cannot be evaluated at all — the save must not proceed in either case, but only the
+     * first is the user's decision, and they get different messages.</p>
+     *
+     * <p>Safe to call from the save worker thread — the dialogs are run on the EDT and waited on.</p>
+     */
+    public static PendingProductionCommit promptForProductionSave(String projectName, String userName,
+                                                                  ProductionModeConfig config)
+            throws Exception {
+        String currentBranch;
+        try {
+            currentBranch = rpc.getCurrentBranch(projectName);
+        } catch (Exception e) {
+            // Hotfix detection is branch equality, so an unknown branch would silently compare
+            // unequal and route a production-branch save down the plain commit + auto-push path,
+            // skipping the branch/PR/merge pipeline entirely. Abort rather than guess.
+            //
+            // Thrown rather than returned as null so this stays distinguishable from the user
+            // declining the dialogs — both cancel the save, but only one of them is the user's
+            // decision, and the message they see should say which.
+            logger.warn("Unable to determine current branch before save; cancelling the save: {}",
+                    e.getMessage());
+            throw new Exception(
+                    "Save cancelled — could not determine the repository's current branch, so the "
+                            + "module cannot tell whether this is a hotfix to the production branch. "
+                            + "Your changes have not been saved. Cause: " + e.getMessage(), e);
+        }
+
+        Object[][] changeData = getProductionSaveChangeData(projectName, userName);
+        boolean isHotfix = config.getProductionBranch() != null
+                && config.getProductionBranch().equals(currentBranch);
+
+        final String branch = currentBranch;
+        final AtomicReference<PendingProductionCommit> result = new AtomicReference<>();
+        runOnEdtAndWait(() -> result.set(runProductionSavePrompts(config, branch, isHotfix, changeData)));
+        return result.get();
+    }
+
+    private static PendingProductionCommit runProductionSavePrompts(ProductionModeConfig config, String currentBranch,
+                                                                    boolean isHotfix, Object[][] changeData) {
+        // Constructor shows the dialog modally and returns once it is dismissed.
+        ProductionModePopup checklist =
+                new ProductionModePopup(context.getFrame(), config, "Save to Production Gateway");
+        if (!checklist.isConfirmed()) {
+            return null;
+        }
+
+        if (isHotfix) {
+            logger.info("Hotfix scenario detected on save: production mode on branch '{}'", currentBranch);
+            HotfixCommitDialog dialog =
+                    new HotfixCommitDialog(context.getFrame(), changeData, config.getProductionBranch());
+            dialog.setVisible(true);
+            if (!dialog.isConfirmed()) {
+                return null;
+            }
+            List<String> selected = dialog.getSelectedChanges();
+            if (selected.isEmpty()) {
+                JOptionPane.showMessageDialog(context.getFrame(),
+                        "No changes were selected, so the save was cancelled.",
+                        "No Changes", JOptionPane.WARNING_MESSAGE);
+                return null;
+            }
+            return new PendingProductionCommit(true, dialog.getHotfixDescription(),
+                    dialog.getCommitMessage(), selected);
+        }
+
+        ProductionCommitDialog dialog = new ProductionCommitDialog(context.getFrame(), changeData, currentBranch);
+        dialog.setVisible(true);
+        if (!dialog.isConfirmed()) {
+            return null;
+        }
+        return new PendingProductionCommit(false, null, dialog.getCommitMessage(), dialog.getSelectedChanges());
+    }
+
+    private static void runOnEdtAndWait(Runnable task) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            task.run();
+            return;
+        }
+        try {
+            SwingUtilities.invokeAndWait(task);
+        } catch (InterruptedException e) {
+            // Leave the result unset so the caller aborts the save rather than saving unconfirmed.
+            Thread.currentThread().interrupt();
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            logger.error("Production save prompt failed", cause);
+            throw new RuntimeException(cause);
+        }
+    }
+
+    /**
+     * Run the commit the user authorised before the save. Called from
+     * {@code DesignerHook.notifyProjectSaveDone}, once the resources are on disk.
+     */
+    public static void executeProductionCommit(String projectName, String userName,
+                                               PendingProductionCommit pending) {
+        SwingUtilities.invokeLater(() -> {
+            if (pending.isHotfix()) {
+                executeHotfixWithProgress(projectName, userName, pending.getHotfixDescription(),
+                        pending.getCommitMessage(), pending.getChangesArray());
+            } else {
+                SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
+                    @Override
+                    protected Void doInBackground() {
+                        handleCommitAction(pending.getChanges(), pending.getCommitMessage());
+                        return null;
+                    }
+                };
+                worker.execute();
+            }
+        });
+    }
+
     private static void executeHotfixWithProgress(String projectName, String userName,
                                                    String description, String message, String[] changes) {
         SwingWorker<HotfixResult, Void> executor = new SwingWorker<HotfixResult, Void>() {
@@ -358,7 +540,7 @@ public class GitActionManager {
     /**
      * Push the current branch to remote. Push is outbound and does not modify this gateway,
      * so there is no Designer-side production warning here — the warning happens at save time
-     * (see DesignerHook.notifyProjectSaveDone), and the gateway still hard-blocks pushes from
+     * (see DesignerHook.notifyProjectSaveStart), and the gateway still hard-blocks pushes from
      * unsafe repository states.
      */
     public static void pushCurrentBranch(String projectName, String userName) {

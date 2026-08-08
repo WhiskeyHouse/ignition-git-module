@@ -118,7 +118,10 @@ flowchart TD
     TYPE -->|Save Ctrl+S| PROD_CHECK_SAVE{Production mode?}
     PROD_CHECK_SAVE -->|No| NORMAL_SAVE[Normal save]
     PROD_CHECK_SAVE -->|Yes| SAVE_WARN[ProductionModePopup<br/>4-item safety checklist]
-    SAVE_WARN --> COMMIT_FLOW[Commit dialog auto-opens<br/>hotfix workflow on production branch]
+    SAVE_WARN -->|Cancel / X| ABORT_SAVE[SAVE ABORTED<br/>changes stay unsaved in Designer]
+    SAVE_WARN -->|Proceed| SAVE_COMMIT_MSG[Commit details collected<br/>HotfixCommitDialog on production branch,<br/>otherwise ProductionCommitDialog]
+    SAVE_COMMIT_MSG -->|Cancel / X| ABORT_SAVE
+    SAVE_COMMIT_MSG -->|Confirm| RUN_SAVE[Save runs, then commit+push<br/>hotfix pipeline on production branch]
 
     TYPE -->|Commit| PROD_CHECK_COMMIT{Production mode +<br/>on production branch?}
     PROD_CHECK_COMMIT -->|No| NORMAL_COMMIT[Normal commit]
@@ -136,6 +139,8 @@ flowchart TD
     style BLOCK_BRANCH fill:#FFCDD2
     style HOTFIX fill:#C8E6C9
     style SAVE_WARN fill:#FFF9C4
+    style SAVE_COMMIT_MSG fill:#FFF9C4
+    style ABORT_SAVE fill:#FFCDD2
 ```
 
 ### Repository Safety Checks
@@ -206,8 +211,8 @@ sequenceDiagram
     participant GH as GitHub
 
     E->>D: Makes fix, saves (Ctrl+S)
-    D->>E: Production warning (safety checklist)
-    E->>D: Checks all items, clicks "Proceed with Caution"
+
+    Note over D: notifyProjectSaveStart -- nothing written to the gateway yet
 
     D->>G: getProductionModeConfig()
     G-->>D: config (productionMode=true, branch=main)
@@ -216,9 +221,18 @@ sequenceDiagram
 
     Note over D: Detects: production mode + on production branch = HOTFIX
 
+    D->>E: Production warning (safety checklist)
+    E->>D: Checks all items, clicks "Proceed with Caution"
+
     D->>E: Shows HotfixCommitDialog
     E->>D: Enters description, message, selects changes
     E->>D: Clicks "Proceed with Hotfix"
+
+    Note over D: Cancelling either dialog throws from notifyProjectSaveStart,<br/>which aborts the save -- nothing reaches the gateway
+
+    D->>G: Save runs (resources written to gateway)
+
+    Note over D: notifyProjectSaveDone -- runs the authorised commit
 
     D->>G: executeHotfix(project, user, desc, msg, changes)
 
@@ -250,15 +264,25 @@ sequenceDiagram
 ### How It Works
 
 1. **Engineer makes a fix** in the Ignition Designer (edits a script, modifies a view, etc.)
-2. **Saves the project** (Ctrl+S)
-3. **Module shows the production warning** -- the 4-item safety checklist (`ProductionModePopup`), since the save is what changed the gateway
-4. **Engineer confirms** -- the commit dialog opens automatically and the module detects the hotfix scenario (production mode + on production branch)
+2. **Saves the project** (Ctrl+S) -- the save is intercepted at `notifyProjectSaveStart`, before anything reaches the gateway
+3. **Module shows the production warning** -- the 4-item safety checklist (`ProductionModePopup`)
+4. **Engineer confirms** -- the module detects the hotfix scenario (production mode + on production branch)
 5. **Hotfix Commit Dialog appears** -- the engineer provides:
    - A short **hotfix description** (used in branch name and PR title)
    - A **commit message** explaining the fix
    - Selects which **changed resources** to include
-6. **Engineer clicks "Proceed with Hotfix"** -- the automated pipeline runs
+6. **Engineer clicks "Proceed with Hotfix"** -- the save runs, then the automated pipeline
 7. **Progress dialog** shows real-time status of each step with a clickable PR link on completion
+
+**Cancelling.** Closing or cancelling either dialog aborts the save outright: `notifyProjectSaveStart`
+throws, `IgnitionDesigner.commitAll()` reduces to `false`, and `handleSave` returns before writing
+anything. The changes stay unsaved and still open in the Designer. This is the only point at which a
+module can stop a save -- by `notifyProjectSaveDone` the resources are already on the gateway, so a
+prompt there could not undo them.
+
+> **Tag edits are not covered.** Tags are written to the tag provider immediately by the tag editor
+> and never travel through the project-save pipeline, so the save gate cannot intercept or roll them
+> back. Tag changes made in production reach the gateway as soon as they are applied.
 
 ### Pipeline Steps
 

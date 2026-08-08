@@ -47,6 +47,9 @@ public class DesignerHook extends AbstractDesignerModuleHook {
     PopupMenuListener docsPopupListener;
     JPopupMenu sharedPopupMenuRef;
     private static ProductionModeConfig cachedProductionConfig;
+    // Written on the save worker thread in notifyProjectSaveStart, read in notifyProjectSaveDone
+    // (which Ignition dispatches on a separate executor thread).
+    private static volatile PendingProductionCommit pendingProductionCommit;
     private Timer productionConfigRefreshTimer;
 
     @Override
@@ -277,14 +280,87 @@ public class DesignerHook extends AbstractDesignerModuleHook {
         cachedProductionConfig = null;
     }
 
+    /**
+     * Production gate for saves.
+     *
+     * <p>Saving is the moment the production gateway actually changes, and
+     * {@code notifyProjectSaveStart} is the only point at which Ignition lets a module stop a
+     * save: {@code IgnitionDesigner.commitAll()} reduces every module hook's result with
+     * {@code Boolean.logicalAnd}, and a hook that throws is recorded as {@code false}, which
+     * makes {@code handleSave} return before any resource is written. So the safety checklist
+     * and the commit details are both collected here \u2014 cancelling either one aborts the save
+     * and leaves the changes unsaved and still open in the Designer.</p>
+     *
+     * <p>The authorised commit is parked in {@link #pendingProductionCommit} and executed in
+     * {@link #notifyProjectSaveDone()}, once the resources are actually on disk.</p>
+     */
     @Override
-    public void notifyProjectSaveStart(SaveContext save) {
+    public void notifyProjectSaveStart(SaveContext save) throws Exception {
+        pendingProductionCommit = null;
+
+        boolean pendingChangesUnknown = false;
         try {
             changes = context.getProject().getChanges();
             super.notifyProjectSaveStart(save);
         } catch (Exception e) {
             logger.error("Error in notifyProjectSaveStart", e);
             changes = null;
+            pendingChangesUnknown = true;
+        }
+
+        ProductionModeConfig config = resolveProductionConfigForSave();
+        if (config == null || !config.isProductionMode()) {
+            // Outside production mode this snapshot only pre-ticks checkboxes in the commit
+            // dialog, so losing it is cosmetic and the save proceeds as it always did.
+            return;
+        }
+
+        // In production mode the snapshot is what tells the commit dialog which resources this
+        // save is about to write. Without it the dialog lists only the pre-existing working-tree
+        // changes, so the user can authorise a commit that silently excludes everything they
+        // just saved — leaving new resources live on the gateway and uncommitted. Refuse the
+        // save rather than show a dialog that misrepresents it.
+        if (pendingChangesUnknown) {
+            throw new SaveCancelledException(
+                    "Save cancelled — the set of changes being saved could not be determined, so the "
+                            + "production commit dialog cannot be trusted to show what this save writes. "
+                            + "Your changes have not been saved. Retry the save; if it keeps failing, "
+                            + "check the Designer logs for the underlying error.");
+        }
+
+        PendingProductionCommit authorised =
+                GitActionManager.promptForProductionSave(projectName, userName, config);
+        if (authorised == null) {
+            // The only way to veto the save is to throw; this message is surfaced to the user.
+            throw new SaveCancelledException(
+                    "Save cancelled \u2014 production mode confirmation was not completed. "
+                            + "Your changes have not been saved and are still open in the Designer.");
+        }
+        pendingProductionCommit = authorised;
+    }
+
+    /**
+     * Production config for the save gate, fetched fresh every time.
+     *
+     * <p>Deliberately does <em>not</em> consult {@link #cachedProductionConfig}. That cache is
+     * refreshed on a five-minute timer, so a gateway switched into production mode since the
+     * last refresh would report {@code false} here and let a save through completely ungated \u2014
+     * a window in which the feature simply does not exist. The cache still backs the status-bar
+     * badge and the branch-switch guard, where staleness is cosmetic rather than a safety hole.</p>
+     *
+     * <p>One RPC per save is a fair price for a gate that decides whether a production gateway
+     * gets modified. An unreachable gateway is treated as production rather than failing open.</p>
+     */
+    private ProductionModeConfig resolveProductionConfigForSave() {
+        try {
+            ProductionModeConfig config = rpc.getProductionModeConfig(projectName);
+            cachedProductionConfig = config;
+            return config;
+        } catch (Exception e) {
+            logger.warn("Unable to verify production mode before save; gating conservatively", e);
+            ProductionModeConfig fallback = new ProductionModeConfig(true, null, null);
+            fallback.setWarningMessage("Unable to verify production mode for this gateway: " + e.getMessage());
+            return fallback;
         }
     }
 
@@ -292,54 +368,22 @@ public class DesignerHook extends AbstractDesignerModuleHook {
     public void notifyProjectSaveDone() {
         super.notifyProjectSaveDone();
 
-        // Saving is the moment the production gateway actually changes, so this is where the
-        // production warning lives (push is outbound and not gated). Proceeding flows straight
-        // into the commit dialog \u2014 hotfix workflow on the production branch \u2014 and commits in
-        // production mode auto-push, keeping the remote in sync with the gateway.
-        ProductionModeConfig config = cachedProductionConfig;
-        if (config != null) {
-            showSaveWarningIfProduction(config);
+        PendingProductionCommit authorised = pendingProductionCommit;
+        pendingProductionCommit = null;
+        if (authorised == null) {
             return;
         }
 
-        // The cache is null after invalidation (pull, branch switch, hotfix) until the periodic
-        // refresh fires \u2014 re-fetch now rather than letting a save slip through ungated.
-        SwingWorker<ProductionModeConfig, Void> worker = new SwingWorker<ProductionModeConfig, Void>() {
-            @Override
-            protected ProductionModeConfig doInBackground() throws Exception {
-                return rpc.getProductionModeConfig(projectName);
-            }
-
-            @Override
-            protected void done() {
-                ProductionModeConfig fetched;
-                try {
-                    fetched = get();
-                    cachedProductionConfig = fetched;
-                } catch (Exception e) {
-                    // Can't verify \u2014 treat the gateway as production rather than failing open.
-                    logger.warn("Unable to verify production mode after save; showing warning conservatively", e);
-                    fetched = new ProductionModeConfig(true, null, null);
-                    fetched.setWarningMessage("Unable to verify production mode for this gateway: " + e.getMessage());
-                }
-                showSaveWarningIfProduction(fetched);
-            }
-        };
-        worker.execute();
+        // Commits in production mode auto-push, keeping the remote in sync with the gateway;
+        // on the production branch this runs the hotfix pipeline instead.
+        GitActionManager.executeProductionCommit(projectName, userName, authorised);
     }
 
-    private void showSaveWarningIfProduction(ProductionModeConfig config) {
-        if (config == null || !config.isProductionMode()) {
-            return;
+    /** Signals a user-cancelled save. Thrown to make {@code commitAll()} abort the save. */
+    private static class SaveCancelledException extends Exception {
+        SaveCancelledException(String message) {
+            super(message);
         }
-        SwingUtilities.invokeLater(() -> {
-            new ProductionModePopup(context.getFrame(), config, "Save to Production Gateway") {
-                @Override
-                public void onProceed() {
-                    GitActionManager.showCommitWithHotfixDetection(projectName, userName);
-                }
-            };
-        });
     }
 
     @Override
