@@ -122,8 +122,10 @@ public class GitBaseAction extends BaseAction {
                 }
             } catch (Exception pushEx) {
                 logger.error("Auto-push after commit failed", pushEx);
-                message += "\n\nThe commit succeeded, but the automatic push did not run:\n\n"
-                        + rootMessage(pushEx);
+                // "did not run" would be a claim we cannot support: the push may have failed
+                // after partially updating the remote.
+                message += "\n\nThe commit succeeded, but the automatic push failed or could not "
+                        + "be confirmed:\n\n" + rootMessage(pushEx);
                 messageType = JOptionPane.WARNING_MESSAGE;
             }
 
@@ -141,7 +143,11 @@ public class GitBaseAction extends BaseAction {
      * <p>Gateway validation failures arrive wrapped in {@code ExecutionException} /
      * {@code RuntimeException} layers, and carry a leading {@code [Production Git Operation]}
      * log tag that means nothing to the person reading the dialog. Unwrap to the root cause
-     * and drop the tag.</p>
+     * and drop that tag.</p>
+     *
+     * <p>Only that exact tag is stripped. Stripping any leading {@code [...]} would eat
+     * meaningful git output — {@code [rejected]} on a non-fast-forward push being the obvious
+     * one to lose.</p>
      */
     public static String rootMessage(Throwable t) {
         Throwable root = t;
@@ -150,19 +156,20 @@ public class GitBaseAction extends BaseAction {
         }
 
         String message = root.getMessage();
-        if (message == null || message.trim().isEmpty()) {
+        if (message == null) {
             return root.getClass().getSimpleName();
         }
 
         message = message.trim();
-        if (message.startsWith("[")) {
-            int close = message.indexOf(']');
-            if (close > 0) {
-                message = message.substring(close + 1).trim();
-            }
+        if (message.startsWith(PRODUCTION_LOG_TAG)) {
+            message = message.substring(PRODUCTION_LOG_TAG.length()).trim();
         }
-        return message;
+        // Checked after stripping, so a message that was nothing but the tag still falls back.
+        return message.isEmpty() ? root.getClass().getSimpleName() : message;
     }
+
+    /** Internal log tag the gateway prefixes to production guard failures. */
+    private static final String PRODUCTION_LOG_TAG = "[Production Git Operation]";
 
     public static void handlePullAction(boolean importTags, boolean importTheme, boolean importImages) {
         String message = BundleUtil.get().getStringLenient(GitActionType.PULL.baseBundleKey + ".ConfirmMessage");

@@ -11,9 +11,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 /**
@@ -311,7 +313,7 @@ public class ProductionModeManager {
                 Status status = git.status().call();
 
                 if (status.hasUncommittedChanges()) {
-                    List<String> paths = new ArrayList<>();
+                    Set<String> paths = new TreeSet<>();
                     addPaths(paths, status.getConflicting());
                     addPaths(paths, status.getChanged());
                     addPaths(paths, status.getModified());
@@ -341,24 +343,30 @@ public class ProductionModeManager {
         }
     }
 
-    private static void addPaths(List<String> target, Set<String> paths) {
+    /**
+     * Collect paths for reporting, deduplicated and sorted across every status.
+     *
+     * <p>A {@link TreeSet} rather than sort-per-status: the message does not label which status
+     * each path came from, so per-status ordering is invisible and just reads as an unsorted
+     * list. One global alphabetical order is scannable, and stays stable as files move between
+     * statuses.</p>
+     */
+    private static void addPaths(Set<String> target, Set<String> paths) {
         if (paths == null) {
             return;
         }
-        List<String> sorted = new ArrayList<>(paths);
-        Collections.sort(sorted);
-        for (String path : sorted) {
-            if (!target.contains(path)) {
-                target.add(path);
-            }
-        }
+        target.addAll(paths);
     }
 
-    private static String formatPaths(List<String> paths) {
+    private static String formatPaths(Collection<String> paths) {
         StringBuilder sb = new StringBuilder();
-        int shown = Math.min(paths.size(), MAX_REPORTED_PATHS);
-        for (int i = 0; i < shown; i++) {
-            sb.append("  • ").append(paths.get(i)).append('\n');
+        int shown = 0;
+        for (String path : paths) {
+            if (shown == MAX_REPORTED_PATHS) {
+                break;
+            }
+            sb.append("  • ").append(path).append('\n');
+            shown++;
         }
         if (paths.size() > shown) {
             sb.append("  … and ").append(paths.size() - shown).append(" more\n");

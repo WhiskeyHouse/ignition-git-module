@@ -149,7 +149,7 @@ Untracked files are intentionally ignored since Ignition may create temporary fi
 
 When a check fails, the error names the offending paths (up to 10, then a count of the remainder) so the problem can be resolved without shelling into the gateway:
 
-```
+```text
 Production mode: cannot push because the repository has 3 uncommitted change(s):
   • com.inductiveautomation.perspective/views/Overview/view.json
   • ignition/script-python/util/code.py

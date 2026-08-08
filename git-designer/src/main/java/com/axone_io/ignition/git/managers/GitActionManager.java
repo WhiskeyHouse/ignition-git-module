@@ -374,7 +374,8 @@ public class GitActionManager {
                     // lead with the gateway's reason rather than a wrapped ExecutionException.
                     SwingUtilities.invokeLater(() -> {
                         com.inductiveautomation.ignition.client.util.gui.ErrorUtil.showError(
-                                "Push did not run:\n\n" + GitBaseAction.rootMessage(e), e);
+                                "Push failed or could not be confirmed:\n\n"
+                                        + GitBaseAction.rootMessage(e), e);
                     });
                 }
             }

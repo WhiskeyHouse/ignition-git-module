@@ -322,6 +322,32 @@ public class ProductionModeManagerTest {
     }
 
     @Test
+    public void describeUnsafeState_sortsPathsAcrossStatusesNotWithinThem() throws Exception {
+        // One path per status bucket, named so that per-bucket ordering and global ordering
+        // disagree: 'a_deleted' is collected last (missing) but must be reported first.
+        Files.writeString(new File(repository.getWorkTree(), "m_modified.txt").toPath(), "v1");
+        Files.writeString(new File(repository.getWorkTree(), "a_deleted.txt").toPath(), "v1");
+        git.add().addFilepattern(".").call();
+        git.commit().setMessage("seed").call();
+
+        Files.writeString(new File(repository.getWorkTree(), "m_modified.txt").toPath(), "v2");
+        assertTrue(new File(repository.getWorkTree(), "a_deleted.txt").delete());
+        Files.writeString(new File(repository.getWorkTree(), "z_added.txt").toPath(), "new");
+        git.add().addFilepattern("z_added.txt").call();
+
+        String reason = ProductionModeManager.describeUnsafeState(repository);
+
+        assertNotNull(reason);
+        int deleted = reason.indexOf("a_deleted.txt");
+        int modified = reason.indexOf("m_modified.txt");
+        int added = reason.indexOf("z_added.txt");
+        assertTrue("all three paths should be reported: " + reason,
+                deleted >= 0 && modified >= 0 && added >= 0);
+        assertTrue("expected global alphabetical order, got: " + reason,
+                deleted < modified && modified < added);
+    }
+
+    @Test
     public void validatePush_unsafeRepo_warningNamesTheOffendingPath() throws Exception {
         File readme = new File(repository.getWorkTree(), "README.md");
         Files.writeString(readme.toPath(), "modified content");
