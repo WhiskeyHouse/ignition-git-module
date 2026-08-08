@@ -437,7 +437,9 @@ public class ProductionModeManagerTest {
      */
     private void setUpRemote() throws Exception {
         File remoteDir = tempFolder.newFolder("remote-repo.git");
-        Git.init().setBare(true).setDirectory(remoteDir).call().close();
+        // setInitialBranch matters: without it the bare repo's HEAD dangles at refs/heads/master,
+        // which makes the clone in the behind-only test resolve a nonexistent ref.
+        Git.init().setBare(true).setInitialBranch("main").setDirectory(remoteDir).call().close();
 
         StoredConfig cfg = repository.getConfig();
         cfg.setString("remote", "origin", "url", remoteDir.getAbsolutePath());

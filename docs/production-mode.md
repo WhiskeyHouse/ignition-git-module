@@ -322,17 +322,19 @@ Production mode surfaces this rather than assuming the PR gets merged:
 
 #### Recommended repository setting
 
-For repositories backing a production gateway, prefer **merge commits** (or rebase) over
-**squash** when merging hotfix PRs:
+For repositories backing a production gateway, merge hotfix PRs with a **merge commit**. It is the
+only strategy that preserves the commit the gateway is actually running:
 
 | GitHub merge button | Lands on the remote | Next gateway pull |
 |---|---|---|
-| Merge commit | The exact hotfix commit hash | Clean fast-forward |
-| Squash | A new commit, same content, new hash | Histories permanently forked |
-| Rebase | Rewritten hash | Histories permanently forked |
+| **Merge commit** | The exact hotfix commit hash | Clean fast-forward |
+| Squash | A new commit, same content, rewritten hash | Histories permanently forked |
+| Rebase | A new commit, same content, rewritten hash | Histories permanently forked |
 
-With a merge commit the gateway's history reconciles cleanly on the next pull and the advisory
-clears itself.
+Squash and rebase both rewrite commit identity. The divergence check compares commit hashes, so
+under either strategy the gateway's commit never appears on the remote and the branch reads as
+permanently ahead. Only a merge commit lets the gateway's history reconcile on the next pull and
+clears the advisory by itself.
 
 ### Hotfix Branch Rules
 
