@@ -19,8 +19,11 @@ public class HotfixResult implements Serializable {
         COMMIT("Committing changes"),
         PUSH("Pushing to remote"),
         CREATE_PR("Creating pull request"),
-        SWITCH_BACK("Switching back to main"),
-        MERGE_LOCAL("Merging hotfix into local main"),
+        // Not "main": the production branch is configurable, and hardcoding a name produced
+        // self-contradicting rows like "Switching back to main — Switched to master". The
+        // actual branch already appears in each step's message.
+        SWITCH_BACK("Switching back to the production branch"),
+        MERGE_LOCAL("Merging hotfix into the local production branch"),
         CLEANUP("Cleaning up hotfix branch");
 
         private final String displayName;
