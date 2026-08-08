@@ -6,10 +6,6 @@ import org.jetbrains.annotations.Nullable;
 
 public class ProjectConfig {
     // Getters and setters
-    @lombok.Getter
-    @lombok.Setter
-    private String initDefaultBranch;
-
     @Getter
     @Setter
     private String repo_uri;

@@ -58,9 +58,6 @@ public class GitCommissioningConfig {
     private boolean enforceBranch = true;
     @Getter
     @Setter
-    private String initDefaultBranch;
-    @Getter
-    @Setter
     private boolean productionMode = false;
     @Getter
     @Setter
@@ -88,7 +85,6 @@ public class GitCommissioningConfig {
         this.importThemes = Boolean.TRUE.equals(projectConfig.getCommissioning_importThemes());
         this.enforceBranch = projectConfig.getCommissioning_enforceBranch() == null
                 || Boolean.TRUE.equals(projectConfig.getCommissioning_enforceBranch());
-        this.initDefaultBranch = projectConfig.getInitDefaultBranch();
         this.productionMode = Boolean.TRUE.equals(projectConfig.getProduction_mode());
         this.productionBranch = projectConfig.getProduction_branch();
         this.productionTagPattern = projectConfig.getProduction_tagPattern();
