@@ -6,6 +6,7 @@ import com.axone_io.ignition.git.commissioning.ProjectConfigs;
 import com.axone_io.ignition.git.managers.GitImageManager;
 import com.axone_io.ignition.git.managers.GitManager;
 import com.axone_io.ignition.git.managers.GitProjectManager;
+import com.axone_io.ignition.git.managers.GitPullPolicy;
 import com.axone_io.ignition.git.managers.GitTagManager;
 import com.axone_io.ignition.git.managers.GitThemeManager;
 import com.axone_io.ignition.git.managers.StartupTagImporter;
@@ -278,10 +279,19 @@ public class GitCommissioningUtils {
             // 4. Pull latest on the (now) configured branch.
             String activeBranch = git.getRepository().getBranch();
             logger.info("Pulling latest changes for project '" + projectName + "' on branch '" + activeBranch + "'...");
-            PullCommand pull = git.pull().setRemote(remoteName).setRemoteBranchName(activeBranch);
+            PullCommand pull = GitPullPolicy.applyTo(
+                    git.pull().setRemote(remoteName).setRemoteBranchName(activeBranch));
             setAuthentication(pull, projectName, config.getIgnitionUserName());
             PullResult pullResult = pull.call();
-            logger.info("Pull result for project '" + projectName + "': " + (pullResult.isSuccessful() ? "success" : "failed"));
+
+            // This runs unattended on every gateway restart. If the branch has diverged we must not
+            // reconcile it automatically, and we must not import a working tree the pull refused to
+            // update — the outer catch turns this into "project remains in its current state".
+            String pullFailure = GitPullPolicy.describeFailure(pullResult, git.getRepository());
+            if (pullFailure != null) {
+                throw new IllegalStateException("Cannot sync project '" + projectName + "': " + pullFailure);
+            }
+            logger.info("Pull result for project '" + projectName + "': success");
 
             // 5. Re-import project resources
             importProjectResources(config);

@@ -6,6 +6,7 @@ import com.axone_io.ignition.git.dto.ProductionModeConfig;
 import com.axone_io.ignition.git.managers.GitImageManager;
 import com.axone_io.ignition.git.managers.GitManager;
 import com.axone_io.ignition.git.managers.GitProjectManager;
+import com.axone_io.ignition.git.managers.GitPullPolicy;
 import com.axone_io.ignition.git.managers.GitTagManager;
 import com.axone_io.ignition.git.managers.GitThemeManager;
 import com.axone_io.ignition.git.managers.HotfixManager;
@@ -90,17 +91,26 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             // Get the actual remote name (may not be "origin")
             String remoteName = getRemoteName(git);
 
-            PullCommand pull = git.pull();
+            // Fast-forward or fail: never inherit pull.rebase from repository config, and never
+            // let a deploy silently merge a diverged gateway branch.
+            PullCommand pull = GitPullPolicy.applyTo(git.pull());
             pull.setRemote(remoteName);
             setAuthentication(pull, projectName, userName);
 
             logger.info("Pulling from remote '" + remoteName + "' for project: " + projectName);
             PullResult result = pull.call();
-            if (!result.isSuccessful()) {
-                logger.warn("Cannot pull from git");
-            } else {
-                logger.info("Pull was successful.");
+
+            // A failed pull leaves the working tree on the old revision — or, if it got far enough
+            // to conflict, half-applied. Importing either into a running gateway is worse than not
+            // deploying at all, so stop here rather than continuing on a warning.
+            String failure = GitPullPolicy.describeFailure(result, git.getRepository());
+            if (failure != null) {
+                String errorMsg = "Pull failed for project '" + projectName + "': " + failure
+                        + " Nothing was imported into the gateway.";
+                logger.error(errorMsg);
+                throw new RuntimeException(errorMsg);
             }
+            logger.info("Pull was successful.");
 
             GitProjectManager.importProject(projectName);
 
