@@ -46,8 +46,9 @@ does not match HEAD".
 | Question | Decision |
 |---|---|
 | Trigger timing | Debounced: 5 s of quiet after the last change |
-| Non-production prompt | Lightweight "commit now?" dialog; pulsing status-bar badge if dismissed |
+| Non-production prompt | Lightweight "commit now?" dialog |
 | Production prompt | Existing `ProductionModePopup` checklist, retitled |
+| Dismissed prompt | Leaves a pulsing status-bar badge, in both modes |
 | Badge cleared by | A successful commit only |
 | Scope | Tag, UDT, **and** project changes |
 | Whose changes prompt | Any uncommitted drift, in every open Designer session |
@@ -135,13 +136,14 @@ layouts only — IntelliJ's forms library causes classloader conflicts in the De
   `showCommitWithHotfixDetection`.
 
 **Status bar** — a `pulsingBadge` `JLabel` beside the existing `productionBadge`, its
-background animated by a Swing `Timer`. Shown once a **non-production** prompt has been
-dismissed while changes remain; hidden when `dirty` goes false, i.e. after a successful
-commit. Clicking it reopens the prompt.
+background animated by a Swing `Timer`. Shown once a prompt has been dismissed while
+changes remain, in **both** production and non-production mode; hidden when `dirty` goes
+false, i.e. after a successful commit. Clicking it reopens the prompt appropriate to the
+current mode.
 
-The badge is non-production only. In production mode a dismissed `ProductionModePopup`
-does not leave a badge — the production gateway already carries the permanent PRODUCTION
-badge, and dismissal there is an explicit decision not to proceed.
+In production the badge sits alongside the permanent PRODUCTION badge, so a production
+gateway with uncommitted drift shows both. That is intentional: production is where a
+lingering reminder matters most.
 
 ## Flow
 
