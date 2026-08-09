@@ -460,7 +460,7 @@ public class ImportSuppressionTest {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `mvn -q -pl git-gateway test -Dtest=ImportSuppressionTest`
+Run: `mvn -q -pl git-gateway -am test -Dtest=ImportSuppressionTest`
 Expected: FAIL — compilation error, `ImportSuppression` does not exist.
 
 - [ ] **Step 3: Write the guard**
@@ -513,7 +513,7 @@ public final class ImportSuppression {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `mvn -q -pl git-gateway test -Dtest=ImportSuppressionTest`
+Run: `mvn -q -pl git-gateway -am test -Dtest=ImportSuppressionTest`
 Expected: PASS — 6 tests.
 
 - [ ] **Step 5: Wrap `importTagManager` in the guard**
@@ -548,7 +548,7 @@ Rename it to `importTagManagerInternal` (make it `private static`), and add a ne
 
 - [ ] **Step 6: Verify the whole module still compiles and all tests pass**
 
-Run: `mvn -q -pl git-common,git-gateway test`
+Run: `mvn -q -pl git-common,git-gateway -am test`
 Expected: PASS — no compilation errors, existing `GitTagManagerTest` still green.
 
 - [ ] **Step 7: Commit**
@@ -741,7 +741,7 @@ public class TagChangeWatcherTest {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `mvn -q -pl git-gateway test -Dtest=TagChangeWatcherTest`
+Run: `mvn -q -pl git-gateway -am test -Dtest=TagChangeWatcherTest`
 Expected: FAIL — compilation error, `TagChangeWatcher` does not exist.
 
 - [ ] **Step 3: Write the watcher core**
@@ -873,7 +873,7 @@ public class TagChangeWatcher {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `mvn -q -pl git-gateway test -Dtest=TagChangeWatcherTest`
+Run: `mvn -q -pl git-gateway -am test -Dtest=TagChangeWatcherTest`
 Expected: PASS — 10 tests. The debounce tests use real short timers with latches, so they take a few seconds.
 
 - [ ] **Step 5: Commit**
