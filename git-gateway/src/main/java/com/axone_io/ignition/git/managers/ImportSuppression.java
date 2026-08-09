@@ -30,15 +30,48 @@ public final class ImportSuppression {
 
     private static final AtomicInteger depth = new AtomicInteger();
 
-    private static final ScheduledExecutorService releaser =
-            Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "git-import-suppression-release");
-                // Daemon: a pending release must never hold up gateway shutdown.
-                t.setDaemon(true);
-                return t;
-            });
+    /**
+     * Not final: {@link #shutdown()} retires this executor's thread so it stops pinning the
+     * module's classloader across a hot-deploy, and tests need to recreate it afterward (via
+     * {@link #resetForTest()}) since this guard is a static singleton for the life of the
+     * classloader.
+     */
+    private static volatile ScheduledExecutorService releaser = newReleaser();
+
+    private static ScheduledExecutorService newReleaser() {
+        return Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "git-import-suppression-release");
+            // Daemon: a pending release must never hold up gateway shutdown.
+            t.setDaemon(true);
+            return t;
+        });
+    }
 
     private ImportSuppression() {
+    }
+
+    /**
+     * Retires the release thread. The thread is created lazily, on the first {@code schedule()}
+     * call (i.e. the first pull), so this is a no-op if nothing has ever been suppressed.
+     *
+     * <p>Safe to call more than once, and safe to call from {@code GatewayHook.shutdown()} even
+     * though this guard's state is a static singleton, not an instance owned by the hook: a
+     * module restart loads a fresh classloader with a fresh {@code ImportSuppression} class, so
+     * "shut down forever" here only ever means "for the remaining life of the old classloader,"
+     * which is what we want.</p>
+     *
+     * <p>Any release still in flight is abandoned, but the guard cannot be stranded asserted: a
+     * {@code run()} that has not yet released when this fires — or one that starts afterward —
+     * still lifts its own depth via the {@link java.util.concurrent.RejectedExecutionException}
+     * fallback in {@link #scheduleRelease}.</p>
+     */
+    public static void shutdown() {
+        releaser.shutdownNow();
+    }
+
+    /** Test-only: recreates the release executor after a test has called {@link #shutdown()}. */
+    static void resetForTest() {
+        releaser = newReleaser();
     }
 
     public static boolean isSuppressed() {

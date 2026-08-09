@@ -149,4 +149,34 @@ public class ImportSuppressionTest {
         // suppressed when its debounce timer fires.
         assertEquals(2 * TagChangeWatcher.DEBOUNCE_MS, ImportSuppression.GRACE_MS);
     }
+
+    // ---- shutdown ----
+
+    @Test
+    public void shutdownIsSafeWhenNothingWasEverScheduled() {
+        // The release thread is created lazily on the first schedule() call; shutting it down
+        // before that ever happens (e.g. a gateway that stops before its first pull) must not
+        // throw.
+        ImportSuppression.shutdown();
+        ImportSuppression.shutdown();
+        ImportSuppression.resetForTest();
+    }
+
+    @Test
+    public void runAfterShutdownStillReleasesItsDepth() {
+        // GatewayHook.shutdown() must not be able to strand the guard asserted: a run() that
+        // schedules its release onto an already-shut-down executor should fall back to
+        // releasing immediately via the RejectedExecutionException path, exactly like a
+        // rejected schedule() during normal operation.
+        try {
+            ImportSuppression.shutdown();
+            ImportSuppression.run(() -> { }, SHORT_GRACE_MS);
+            assertFalse("a run() after shutdown must release its own depth, not strand it",
+                    ImportSuppression.isSuppressed());
+        } finally {
+            // Restore a live executor so later tests (and the grace-period behaviour they
+            // depend on) are unaffected by this test having shut the shared singleton down.
+            ImportSuppression.resetForTest();
+        }
+    }
 }

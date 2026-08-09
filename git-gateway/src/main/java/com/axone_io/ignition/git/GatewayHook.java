@@ -1,6 +1,7 @@
 package com.axone_io.ignition.git;
 
 import com.axone_io.ignition.git.commissioning.utils.GitCommissioningUtils;
+import com.axone_io.ignition.git.managers.ImportSuppression;
 import com.axone_io.ignition.git.managers.TagChangeWatcher;
 import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
 import com.axone_io.ignition.git.records.GitReposUsersRecord;
@@ -182,6 +183,14 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         }
         tagChangeWatcher = null;
         tagResourceListener = null;
+        try {
+            // Static singleton, not owned by this instance, but its release thread is created
+            // lazily on the first pull and would otherwise pin this classloader across a
+            // hot-deploy for the rest of the JVM's life.
+            ImportSuppression.shutdown();
+        } catch (Exception e) {
+            logger.warn("Could not shut down the import suppression release thread.", e);
+        }
         logger.info("shutdown()");
     }
 
