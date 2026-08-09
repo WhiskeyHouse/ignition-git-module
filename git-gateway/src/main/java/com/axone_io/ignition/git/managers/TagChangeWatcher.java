@@ -1,9 +1,16 @@
 package com.axone_io.ignition.git.managers;
 
+import com.axone_io.ignition.git.GatewayHook;
 import com.axone_io.ignition.git.TagExportConfig;
+import com.inductiveautomation.ignition.common.resourcecollection.ChangeOperation;
+import com.inductiveautomation.ignition.common.resourcecollection.ResourceFilter;
+import com.inductiveautomation.ignition.common.resourcecollection.ResourceListener;
+import com.inductiveautomation.ignition.gateway.tags.config.TagResourceTypes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -116,5 +123,65 @@ public class TagChangeWatcher {
             }
         }
         return exported;
+    }
+
+    /**
+     * A watcher wired to the real export path: on each settled burst, export tags for every
+     * git-tracked project that is eligible for unattended export.
+     */
+    public static TagChangeWatcher createDefault() {
+        return new TagChangeWatcher(DEBOUNCE_MS, TagChangeWatcher::exportAllTrackedProjects);
+    }
+
+    private static void exportAllTrackedProjects() {
+        List<String> projects = GatewayHook.getScriptModule().getGitTrackedProjectNames();
+        int trackedCount = projects.size();
+
+        int exported = runExport(
+                projects,
+                projectName -> {
+                    Path tagsDir = GitManager.getProjectFolderPath(projectName).resolve("tags");
+                    return isAutoExportEligible(GitTagManager.loadTagExportConfig(tagsDir), trackedCount);
+                },
+                projectName -> GitTagManager.exportTag(GitManager.getProjectFolderPath(projectName)));
+
+        logger.debug("Automatic tag export finished for " + exported + " of " + trackedCount
+                + " tracked project(s).");
+    }
+
+    /**
+     * Adapts this watcher to Ignition's resource system. Every callback collapses to the same
+     * thing — "some tag or UDT changed" — because the debounced export re-reads the live tag
+     * configuration anyway and has no use for the individual operations.
+     */
+    public ResourceListener asResourceListener() {
+        return new ResourceListener() {
+            @Override
+            public ResourceFilter getResourceFilter() {
+                return ResourceFilter.newBuilder()
+                        .addResourceTypes(Arrays.asList(
+                                TagResourceTypes.TAG_DEFINITION,
+                                TagResourceTypes.TYPE_DEFINITION))
+                        .build();
+            }
+
+            @Override
+            public void resourcesCreated(String collectionName,
+                                         List<ChangeOperation.CreateResourceOperation> operations) {
+                onTagResourceChanged();
+            }
+
+            @Override
+            public void resourcesModified(String collectionName,
+                                          List<ChangeOperation.ModifyResourceOperation> operations) {
+                onTagResourceChanged();
+            }
+
+            @Override
+            public void resourcesDeleted(String collectionName,
+                                         List<ChangeOperation.DeleteResourceOperation> operations) {
+                onTagResourceChanged();
+            }
+        };
     }
 }
