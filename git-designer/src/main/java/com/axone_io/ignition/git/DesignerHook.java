@@ -514,6 +514,18 @@ public class DesignerHook extends AbstractDesignerModuleHook {
         GitActionManager.executeProductionCommit(projectName, userName, authorised);
     }
 
+    /**
+     * Records the drift the user has just been shown as dismissed, so the poller does not
+     * re-prompt for the same changes the moment the save checklist closes.
+     */
+    private void dismissCurrentRevision() {
+        RepoDirtyState state = lastKnownDirtyState;
+        if (state != null && state.isKnown() && state.isDirty()) {
+            dismissedRevision = state.getRevision();
+        }
+        updatePendingBadge();
+    }
+
     /** Signals a user-cancelled save. Thrown to make {@code commitAll()} abort the save. */
     private static class SaveCancelledException extends Exception {
         SaveCancelledException(String message) {
