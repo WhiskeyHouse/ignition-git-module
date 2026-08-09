@@ -912,7 +912,6 @@ Append these imports to `TagChangeWatcher.java`:
 ```java
 import com.axone_io.ignition.git.GatewayHook;
 import com.inductiveautomation.ignition.common.resourcecollection.ChangeOperation;
-import com.inductiveautomation.ignition.common.resourcecollection.ResourceChangeContext;
 import com.inductiveautomation.ignition.common.resourcecollection.ResourceFilter;
 import com.inductiveautomation.ignition.common.resourcecollection.ResourceListener;
 import com.inductiveautomation.ignition.gateway.tags.config.TagResourceTypes;
@@ -958,23 +957,10 @@ Append these members to the class:
             @Override
             public ResourceFilter getResourceFilter() {
                 return ResourceFilter.newBuilder()
-                        .setResourceTypes(Arrays.asList(
+                        .addResourceTypes(Arrays.asList(
                                 TagResourceTypes.TAG_DEFINITION,
                                 TagResourceTypes.TYPE_DEFINITION))
                         .build();
-            }
-
-            @Override
-            public void onBeforeChanges(ResourceChangeContext context) {
-            }
-
-            @Override
-            public void onAfterChanges() {
-            }
-
-            @Override
-            public void manifestChanged(String collectionName,
-                                        List<ChangeOperation.ManifestChangeOperation> operations) {
             }
 
             @Override
@@ -998,7 +984,9 @@ Append these members to the class:
     }
 ```
 
-**If the build fails here**, the `ResourceFilter.Builder` setter name or the `ResourceListener` method set differs from the above. Do not guess — inspect the real API and adjust:
+The API above is verified against the 8.3.1 jars: `ResourceFilter.Builder` exposes `addResourceTypes(Collection<ResourceType>)` (there is NO `setResourceTypes`), and on `ResourceListener` only `resourcesCreated`, `resourcesModified`, and `resourcesDeleted` are abstract — `onBeforeChanges`, `onAfterChanges`, `manifestChanged`, and `getResourceFilter` are default methods, so the anonymous class implements only the three abstract callbacks plus a `getResourceFilter` override. Do not add empty overrides for the defaults.
+
+**If the build still fails here**, inspect the real API rather than guessing:
 
 ```bash
 javap -cp ~/.m2/repository/com/inductiveautomation/ignition/common/8.3.1/common-8.3.1.jar \
