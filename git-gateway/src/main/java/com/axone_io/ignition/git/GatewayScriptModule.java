@@ -3,6 +3,7 @@ package com.axone_io.ignition.git;
 import com.axone_io.ignition.git.commissioning.utils.GitCommissioningUtils;
 import com.axone_io.ignition.git.dto.HotfixResult;
 import com.axone_io.ignition.git.dto.ProductionModeConfig;
+import com.axone_io.ignition.git.dto.RepoDirtyState;
 import com.axone_io.ignition.git.managers.GitImageManager;
 import com.axone_io.ignition.git.managers.GitManager;
 import com.axone_io.ignition.git.managers.GitProjectManager;
@@ -37,6 +38,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -240,6 +242,71 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         }
 
         return result;
+    }
+
+    @Override
+    protected RepoDirtyState getRepoDirtyStateImpl(String projectName, String userName) {
+        RepoDirtyState state = new RepoDirtyState();
+
+        List<UncommittedChange> changes;
+        try {
+            changes = getUncommitedChangesImpl(projectName, userName);
+        } catch (Exception e) {
+            // A poller must never turn a transient git error into a popup. Report clean and
+            // let the next poll correct it.
+            logger.debug("Unable to read working tree status for '" + projectName + "'", e);
+            return state;
+        }
+
+        List<String> keys = new ArrayList<>();
+        int tagCount = 0;
+        int projectCount = 0;
+        for (UncommittedChange change : changes) {
+            String resource = change.getResource();
+            if (resource != null && resource.startsWith("tags/")) {
+                tagCount++;
+            } else {
+                projectCount++;
+            }
+            keys.add(change.getType() + ":" + resource);
+        }
+        Collections.sort(keys);
+
+        state.setDirty(!changes.isEmpty());
+        state.setTagChangeCount(tagCount);
+        state.setProjectChangeCount(projectCount);
+        state.setRevision(changes.isEmpty() ? 0L : hashChangeSet(keys));
+
+        try {
+            ProductionModeConfig config = getProductionModeConfigImpl(projectName);
+            state.setProductionMode(config != null && config.isProductionMode());
+        } catch (Exception e) {
+            // Fail conservative on mode: an unverifiable gateway is treated as production so
+            // the Designer shows the safety checklist rather than the lightweight prompt.
+            logger.debug("Unable to read production mode for '" + projectName
+                    + "'; assuming production", e);
+            state.setProductionMode(true);
+        }
+
+        return state;
+    }
+
+    /**
+     * 64-bit FNV-1a over the sorted change set. The Designer treats a changed revision as
+     * "new changes worth prompting about", so this must depend on which files changed and
+     * how — not merely how many.
+     */
+    private static long hashChangeSet(List<String> sortedKeys) {
+        long hash = 0xcbf29ce484222325L;
+        for (String key : sortedKeys) {
+            for (int i = 0; i < key.length(); i++) {
+                hash ^= key.charAt(i);
+                hash *= 0x100000001b3L;
+            }
+            hash ^= '\n';
+            hash *= 0x100000001b3L;
+        }
+        return hash;
     }
 
     private void collectUncommittedChanges(String projectName,
