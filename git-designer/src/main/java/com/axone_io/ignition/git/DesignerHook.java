@@ -61,6 +61,13 @@ public class DesignerHook extends AbstractDesignerModuleHook {
     private boolean pulseBright = false;
     private RepoDirtyState lastKnownDirtyState;
     private long dismissedRevision = DirtyStatePolicy.NEVER_DISMISSED;
+    /**
+     * Set when a production save completes, cleared by the first poll that sees the resulting
+     * drift. Written on the save thread and read on the EDT, hence volatile.
+     *
+     * @see DirtyStatePolicy#resolveDismissedRevision
+     */
+    private volatile boolean dismissDriftAfterSave = false;
     private boolean dirtyCheckInFlight = false;
     private boolean gitConfigured = true;
 
@@ -379,6 +386,14 @@ public class DesignerHook extends AbstractDesignerModuleHook {
     private void applyDirtyState() {
         RepoDirtyState state = lastKnownDirtyState;
 
+        // First poll after a production save carries the change set the checklist showed.
+        long resolved = DirtyStatePolicy.resolveDismissedRevision(
+                state, dismissedRevision, dismissDriftAfterSave);
+        if (resolved != dismissedRevision) {
+            dismissedRevision = resolved;
+            dismissDriftAfterSave = false;
+        }
+
         DirtyStatePolicy.Action action =
                 DirtyStatePolicy.decide(state, dismissedRevision, GitWorkflowPrompter.isPromptOpen());
 
@@ -500,11 +515,21 @@ public class DesignerHook extends AbstractDesignerModuleHook {
     public void notifyProjectSaveDone() {
         super.notifyProjectSaveDone();
 
+        PendingProductionCommit authorised = pendingProductionCommit;
+        pendingProductionCommit = null;
+
+        // Only a production save has already shown the user its changes, in the safety checklist,
+        // so only it suppresses the poller's prompt — an ordinary save should still raise the
+        // usual "commit now?" dialog. Arming here rather than at the checklist means an aborted
+        // save (which never reaches this method) can never leave a dismissal armed for whatever
+        // drift happens to come next.
+        if (authorised != null) {
+            dismissDriftAfterSave = true;
+        }
+
         // A project save dirties the tree immediately; don't make the user wait for the poll.
         SwingUtilities.invokeLater(this::checkRepoDirtyState);
 
-        PendingProductionCommit authorised = pendingProductionCommit;
-        pendingProductionCommit = null;
         if (authorised == null) {
             return;
         }
@@ -512,18 +537,6 @@ public class DesignerHook extends AbstractDesignerModuleHook {
         // Commits in production mode auto-push, keeping the remote in sync with the gateway;
         // on the production branch this runs the hotfix pipeline instead.
         GitActionManager.executeProductionCommit(projectName, userName, authorised);
-    }
-
-    /**
-     * Records the drift the user has just been shown as dismissed, so the poller does not
-     * re-prompt for the same changes the moment the save checklist closes.
-     */
-    private void dismissCurrentRevision() {
-        RepoDirtyState state = lastKnownDirtyState;
-        if (state != null && state.isKnown() && state.isDirty()) {
-            dismissedRevision = state.getRevision();
-        }
-        updatePendingBadge();
     }
 
     /** Signals a user-cancelled save. Thrown to make {@code commitAll()} abort the save. */

@@ -122,27 +122,41 @@ public class TagChangeWatcherTest {
 
     // ---------- eligibility ----------
 
+    // Eligibility is ownership, not a heuristic. The earlier rule — allow on a single-project
+    // gateway, otherwise require includedProviders — modelled ownership partitioned by tag
+    // provider. That cannot work: themes and images are gateway-scoped with no per-project
+    // subdivision, so there is nothing to partition them by. Exactly one project owns all three.
+
     @Test
-    public void singleProjectGateway_alwaysEligible() {
-        assertTrue(TagChangeWatcher.isAutoExportEligible(new TagExportConfig(), 1));
+    public void designatedOwner_isEligible() {
+        assertTrue(TagChangeWatcher.isAutoExportEligible(
+                "WHK-Global", Collections.singletonList("WHK-Global")));
     }
 
     @Test
-    public void multiProjectGateway_ineligibleWithoutIncludedProviders() {
-        assertFalse("auto-export would write every provider's tags into one repo",
-                TagChangeWatcher.isAutoExportEligible(new TagExportConfig(), 3));
+    public void projectThatDoesNotOwnGatewayResources_isNotEligible() {
+        assertFalse("auto-export would write every provider's tags into the wrong repo",
+                TagChangeWatcher.isAutoExportEligible(
+                        "WHK-Reporting", Collections.singletonList("WHK-Global")));
     }
 
     @Test
-    public void multiProjectGateway_eligibleWithIncludedProviders() {
-        TagExportConfig config = new TagExportConfig(
-                Collections.singletonList("PlantA"), new ArrayList<>(), "o");
-        assertTrue(TagChangeWatcher.isAutoExportEligible(config, 3));
+    public void singleProjectGateway_stillRequiresAnExplicitOwner() {
+        assertFalse("a lone project is not implicitly the owner — inferring one is how the "
+                        + "competing-writer bug got in",
+                TagChangeWatcher.isAutoExportEligible("WHK-Global", Collections.emptyList()));
     }
 
     @Test
-    public void nullConfig_ineligibleOnMultiProjectGateway() {
-        assertFalse(TagChangeWatcher.isAutoExportEligible(null, 3));
+    public void severalProjectsClaimingOwnership_makesNoneEligible() {
+        assertFalse(TagChangeWatcher.isAutoExportEligible(
+                "WHK-Global", Arrays.asList("WHK-Global", "WHK-Reporting")));
+    }
+
+    @Test
+    public void unknownOwners_makeNothingEligible() {
+        assertFalse("an unreadable config must not be read as 'go ahead'",
+                TagChangeWatcher.isAutoExportEligible("WHK-Global", null));
     }
 
     // ---------- per-project export ----------

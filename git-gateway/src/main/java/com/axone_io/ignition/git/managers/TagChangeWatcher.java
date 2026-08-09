@@ -1,6 +1,7 @@
 package com.axone_io.ignition.git.managers;
 
 import com.axone_io.ignition.git.GatewayHook;
+import com.axone_io.ignition.git.GatewayResourceExportPolicy;
 import com.axone_io.ignition.git.TagExportConfig;
 import com.inductiveautomation.ignition.common.resourcecollection.ChangeOperation;
 import com.inductiveautomation.ignition.common.resourcecollection.ResourceFilter;
@@ -11,6 +12,7 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -85,18 +87,23 @@ public class TagChangeWatcher {
     /**
      * Whether a project may be auto-exported without a user present to confirm.
      *
-     * <p>On a gateway tracking several projects, exporting tags writes <em>every</em>
-     * provider's tags into whichever repository ran the export — which is why the manual
-     * Export button asks for confirmation first. Automatic export has nobody to ask, so it
-     * runs only where the project has narrowed its scope with {@code includedProviders}.</p>
+     * <p>Exporting writes <em>every</em> tag provider — plus the gateway's themes and images —
+     * into whichever repository ran the export, which is why the manual Export button asks for
+     * confirmation first. Automatic export has nobody to ask, so it runs only for the project
+     * explicitly designated to own gateway-scoped resources.</p>
+     *
+     * <p>An earlier rule allowed any lone project, and otherwise required the project to have
+     * narrowed {@code includedProviders}. That modelled ownership partitioned by tag provider,
+     * which cannot work: themes and images are gateway-scoped with no per-project subdivision,
+     * so there is nothing to partition them by. And inferring an owner from "there is only one
+     * project" silently changes behaviour the moment a second project is added — the exact
+     * failure this guard exists to prevent.</p>
+     *
+     * @param projectName the project whose automatic export is being considered
+     * @param owners      names of every project with {@code gateway_exportResources} enabled
      */
-    public static boolean isAutoExportEligible(TagExportConfig config, int trackedProjectCount) {
-        if (trackedProjectCount <= 1) {
-            return true;
-        }
-        return config != null
-                && config.getIncludedProviders() != null
-                && !config.getIncludedProviders().isEmpty();
+    public static boolean isAutoExportEligible(String projectName, Collection<String> owners) {
+        return GatewayResourceExportPolicy.describeSkipReason(projectName, owners) == null;
     }
 
     /**
@@ -111,7 +118,7 @@ public class TagChangeWatcher {
         for (String projectName : projectNames) {
             if (!eligible.test(projectName)) {
                 logger.debug("Skipping automatic tag export for project '" + projectName
-                        + "': not eligible on a multi-project gateway without includedProviders.");
+                        + "': it is not the designated owner of gateway-scoped resources.");
                 continue;
             }
             try {
@@ -137,12 +144,13 @@ public class TagChangeWatcher {
         List<String> projects = GatewayHook.getScriptModule().getGitTrackedProjectNames();
         int trackedCount = projects.size();
 
+        // Resolved once per burst rather than per project, so every project in a single export
+        // pass sees the same ownership picture.
+        Collection<String> owners = GatewayHook.getScriptModule().getGatewayResourceOwnerNames();
+
         int exported = runExport(
                 projects,
-                projectName -> {
-                    Path tagsDir = GitManager.getProjectFolderPath(projectName).resolve("tags");
-                    return isAutoExportEligible(GitTagManager.loadTagExportConfig(tagsDir), trackedCount);
-                },
+                projectName -> isAutoExportEligible(projectName, owners),
                 projectName -> GitTagManager.exportTag(GitManager.getProjectFolderPath(projectName)));
 
         logger.debug("Automatic tag export finished for " + exported + " of " + trackedCount

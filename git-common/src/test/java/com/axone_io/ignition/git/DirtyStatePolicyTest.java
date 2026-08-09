@@ -128,4 +128,63 @@ public class DirtyStatePolicyTest {
     public void describesProjectOnlyChanges() {
         assertEquals("3 project changes", state(1L, true, 0, 3).describeChanges());
     }
+
+    // ---------- dismissal armed by a production save ----------
+    //
+    // A production save shows the user the drift in the safety checklist before writing, so the
+    // poller must not immediately re-prompt for it. The revision is a hash of the change set and
+    // the resources are written after the checklist is accepted, so the revision to dismiss does
+    // not exist until the next poll — the dismissal is armed at save time and applied here.
+
+    @Test
+    public void armedDismissal_adoptsTheRevisionOfTheStateItSees() {
+        assertEquals(77L, DirtyStatePolicy.resolveDismissedRevision(
+                state(77L, true, 1, 0), DirtyStatePolicy.NEVER_DISMISSED, true));
+    }
+
+    @Test
+    public void armedDismissal_ignoresACleanTree() {
+        assertEquals("nothing was saved that needs dismissing", 5L,
+                DirtyStatePolicy.resolveDismissedRevision(state(77L, false, 0, 0), 5L, true));
+    }
+
+    @Test
+    public void armedDismissal_ignoresAnUnknownState() {
+        assertEquals("an unreadable working tree is not evidence the save landed", 5L,
+                DirtyStatePolicy.resolveDismissedRevision(unknownState(), 5L, true));
+    }
+
+    @Test
+    public void armedDismissal_ignoresANullState() {
+        assertEquals(5L, DirtyStatePolicy.resolveDismissedRevision(null, 5L, true));
+    }
+
+    @Test
+    public void unarmed_neverChangesTheDismissedRevision() {
+        assertEquals("an ordinary save must still raise the commit prompt", 5L,
+                DirtyStatePolicy.resolveDismissedRevision(state(77L, true, 1, 0), 5L, false));
+    }
+
+    @Test
+    public void armedDismissal_thenDecide_yieldsBadgeNotPrompt() {
+        RepoDirtyState postSave = state(77L, true, 3, 0);
+        long dismissed = DirtyStatePolicy.resolveDismissedRevision(
+                postSave, DirtyStatePolicy.NEVER_DISMISSED, true);
+
+        assertEquals("the save the user just authorised must not re-prompt",
+                DirtyStatePolicy.Action.BADGE_ONLY,
+                DirtyStatePolicy.decide(postSave, dismissed, false));
+    }
+
+    @Test
+    public void armedDismissal_doesNotSuppressTheNextUnrelatedChange() {
+        RepoDirtyState postSave = state(77L, true, 3, 0);
+        long dismissed = DirtyStatePolicy.resolveDismissedRevision(
+                postSave, DirtyStatePolicy.NEVER_DISMISSED, true);
+
+        RepoDirtyState laterEdit = state(78L, true, 1, 0);
+        assertEquals("drift after the save is new and must prompt",
+                DirtyStatePolicy.Action.PROMPT,
+                DirtyStatePolicy.decide(laterEdit, dismissed, false));
+    }
 }

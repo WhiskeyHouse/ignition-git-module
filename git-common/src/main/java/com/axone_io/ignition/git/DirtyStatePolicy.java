@@ -29,6 +29,31 @@ public final class DirtyStatePolicy {
      * @param dismissedRevision revision the user last dismissed, or {@link #NEVER_DISMISSED}
      * @param promptOpen       whether a prompt dialog is currently showing
      */
+    /**
+     * Applies a dismissal armed by a production save to the first usable state that follows it.
+     *
+     * <p>A production save shows the user its changes in the safety checklist and writes the
+     * resources <em>afterwards</em>. Since {@code revision} is a hash of the change set, the
+     * revision that needs dismissing does not exist while the checklist is on screen — dismissing
+     * then would record the pre-save change set and leave the post-save one looking new, so the
+     * poller would re-prompt for the save the user just authorised. The caller therefore arms the
+     * dismissal when the save completes and calls this on each poll until it takes effect.</p>
+     *
+     * <p>A clean or unreadable state is not evidence the save landed, so the dismissal is left
+     * armed rather than being spent on nothing.</p>
+     *
+     * @param armed whether a production save is waiting for its change set to be dismissed
+     * @return the revision the caller should now treat as dismissed — unchanged when not armed
+     */
+    public static long resolveDismissedRevision(RepoDirtyState state,
+                                                long dismissedRevision,
+                                                boolean armed) {
+        if (!armed || state == null || !state.isKnown() || !state.isDirty()) {
+            return dismissedRevision;
+        }
+        return state.getRevision();
+    }
+
     public static Action decide(RepoDirtyState state, long dismissedRevision, boolean promptOpen) {
         // An unknown state is not evidence of anything; never raise a dialog on it.
         if (state == null || !state.isKnown() || !state.isDirty()) {

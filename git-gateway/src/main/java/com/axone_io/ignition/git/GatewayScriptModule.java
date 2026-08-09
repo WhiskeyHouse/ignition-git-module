@@ -365,7 +365,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
         // designated owner may write them, otherwise every git-backed project on the gateway keeps
         // its own competing copy of the same shared state.
         String skipReason = GatewayResourceExportPolicy.describeSkipReason(
-                projectName, getGatewayResourceOwners());
+                projectName, getGatewayResourceOwnerNames());
         if (skipReason != null) {
             logger.warn("Not exporting gateway-scoped resources for project '" + projectName
                     + "': " + skipReason);
@@ -380,7 +380,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
     }
 
     /** Names of every configured project with {@code ExportGatewayResources} enabled. */
-    private List<String> getGatewayResourceOwners() {
+    public List<String> getGatewayResourceOwnerNames() {
         List<String> owners = new ArrayList<>();
         try {
             SQuery<GitProjectsConfigRecord> query = new SQuery<>(GitProjectsConfigRecord.META);
