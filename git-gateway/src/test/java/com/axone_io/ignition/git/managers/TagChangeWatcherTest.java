@@ -64,13 +64,37 @@ public class TagChangeWatcherTest {
         AtomicInteger exports = new AtomicInteger();
         TagChangeWatcher watcher = new TagChangeWatcher(60L, exports::incrementAndGet);
         try {
+            // Zero grace: this test is about events arriving *inside* the import, and the
+            // production grace would otherwise keep suppression asserted for seconds after.
             ImportSuppression.run(() -> {
                 for (int i = 0; i < 5; i++) {
                     watcher.onTagResourceChanged();
                 }
-            });
+            }, 0L);
             Thread.sleep(500L);
             assertEquals(0, exports.get());
+        } finally {
+            watcher.shutdown();
+        }
+    }
+
+    @Test
+    public void eventsArrivingJustAfterAnImportAreStillSuppressed() throws Exception {
+        // The config collection can dispatch an import's resource events after the import
+        // call returns. Releasing suppression at the closing brace would export — and then
+        // prompt the user to commit — exactly what they had just pulled.
+        AtomicInteger exports = new AtomicInteger();
+        TagChangeWatcher watcher = new TagChangeWatcher(60L, exports::incrementAndGet);
+        try {
+            // Grace outlasts the 60ms debounce, so the event fires while still suppressed,
+            // then releases on its own — force-draining it here would let the pending
+            // scheduled release push the depth negative for later tests.
+            ImportSuppression.run(() -> { }, 400L);
+            watcher.onTagResourceChanged();
+            Thread.sleep(800L);
+            assertEquals(0, exports.get());
+            assertFalse("the grace period must release on its own",
+                    ImportSuppression.isSuppressed());
         } finally {
             watcher.shutdown();
         }
