@@ -279,11 +279,40 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected boolean exportConfigImpl(String projectName) {
+        // Images, themes and tags all come from the gateway, not from this project. Only the
+        // designated owner may write them, otherwise every git-backed project on the gateway keeps
+        // its own competing copy of the same shared state.
+        String skipReason = GatewayResourceExportPolicy.describeSkipReason(
+                projectName, getGatewayResourceOwners());
+        if (skipReason != null) {
+            logger.warn("Not exporting gateway-scoped resources for project '" + projectName
+                    + "': " + skipReason);
+            return true;
+        }
+
         Path projectFolderPath = getProjectFolderPath(projectName);
         exportImages(projectFolderPath);
         exportTheme(projectFolderPath);
         exportTag(projectFolderPath);
         return true;
+    }
+
+    /** Names of every configured project with {@code ExportGatewayResources} enabled. */
+    private List<String> getGatewayResourceOwners() {
+        List<String> owners = new ArrayList<>();
+        try {
+            SQuery<GitProjectsConfigRecord> query = new SQuery<>(GitProjectsConfigRecord.META);
+            for (GitProjectsConfigRecord record : context.getPersistenceInterface().query(query)) {
+                if (record.isExportGatewayResources()) {
+                    owners.add(record.getProjectName());
+                }
+            }
+        } catch (Exception e) {
+            // An unreadable config must not be mistaken for "nobody owns them, so go ahead" —
+            // describeSkipReason treats an empty list as unconfigured and refuses the export.
+            logger.error("Could not determine which project owns gateway-scoped resources", e);
+        }
+        return owners;
     }
 
     @Override
