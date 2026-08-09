@@ -1250,8 +1250,9 @@ git commit -m "feat(rpc): add getRepoDirtyState for working-tree drift polling"
 ```
 
 ---
+### Task 6: Designer prompt — dialog, router, poller, and pulsing badge
 
-### Task 6: Designer prompt — dialog, router, and poller
+The whole Designer-side surface lands in one task so the badge and the poller that drives it are never separated by a placeholder.
 
 **Files:**
 - Create: `git-designer/src/main/java/com/axone_io/ignition/git/PendingChangesDialog.java`
@@ -1259,7 +1260,7 @@ git commit -m "feat(rpc): add getRepoDirtyState for working-tree drift polling"
 - Modify: `git-designer/src/main/java/com/axone_io/ignition/git/DesignerHook.java`
 
 **Interfaces:**
-- Consumes: `RepoDirtyState` and `DirtyStatePolicy` from Task 1; `getRepoDirtyState` RPC from Task 5; existing `GitActionManager.showCommitWithHotfixDetection(String, String)`; existing `ProductionModePopup(Component parent, ProductionModeConfig config, String operation)` with overridable `onProceed()`.
+- Consumes: `RepoDirtyState` and `DirtyStatePolicy` (including `DirtyStatePolicy.NEVER_DISMISSED`, `decide(...)`, `shouldShowBadge(...)`) from Task 1; the `getRepoDirtyState` RPC from Task 5; existing `GitActionManager.showCommitWithHotfixDetection(String, String)`; existing `ProductionModePopup(Component parent, ProductionModeConfig config, String operation)` whose `public void onProceed()` is overridable.
 - Produces:
   - `PendingChangesDialog(Window parent, RepoDirtyState state, Runnable onCommit)` — modal, disposes itself.
   - `static void GitWorkflowPrompter.prompt(RepoDirtyState state, String projectName, String userName, Runnable onDismissed)`
@@ -1346,8 +1347,6 @@ import com.axone_io.ignition.git.dto.RepoDirtyState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.swing.*;
-
 /**
  * Routes uncommitted-change prompts by gateway mode. Both paths land in the same commit
  * dialog; production adds the safety checklist first, exactly as project saves do.
@@ -1366,7 +1365,9 @@ public final class GitWorkflowPrompter {
     }
 
     /**
-     * Shows the prompt for the current mode. Must be called on the EDT.
+     * Shows the prompt for the current mode. Must be called on the EDT. Both dialogs are
+     * application-modal and call {@code setVisible(true)} from their constructors, so this
+     * method does not return until the user has dismissed the prompt.
      *
      * @param onDismissed run after the dialog closes, whichever button was used — the caller
      *                    records the dismissed revision so the same changes do not re-prompt.
@@ -1414,9 +1415,7 @@ public final class GitWorkflowPrompter {
 }
 ```
 
-Confirm `ProductionModePopup` declares `onProceed()` as an overridable (non-private, non-final) method — `DesignerHook.showSaveWarningIfProduction` already overrides it the same way, so it is. Confirm the dialog blocks until closed (it is `APPLICATION_MODAL` and calls `setVisible(true)` in its constructor), which is what makes the `finally` block run after dismissal rather than immediately.
-
-- [ ] **Step 3: Add the poller to `DesignerHook`**
+- [ ] **Step 3: Add the Designer fields**
 
 In `DesignerHook.java`, add imports:
 
@@ -1426,14 +1425,20 @@ import com.axone_io.ignition.git.dto.RepoDirtyState;
 import com.axone_io.ignition.git.managers.GitWorkflowPrompter;
 ```
 
-Add fields alongside the existing timers:
+Add fields alongside the existing timers and `productionBadge`:
 
 ```java
     Timer repoDirtyTimer;
+    JLabel pendingChangesBadge;
+    Timer pendingBadgePulseTimer;
+    private boolean pulseBright = false;
     private RepoDirtyState lastKnownDirtyState;
     private long dismissedRevision = DirtyStatePolicy.NEVER_DISMISSED;
     private boolean dirtyCheckInFlight = false;
     private boolean gitConfigured = true;
+
+    private static final java.awt.Color BADGE_DIM = new java.awt.Color(191, 110, 0);
+    private static final java.awt.Color BADGE_BRIGHT = new java.awt.Color(245, 158, 11);
 ```
 
 `startup(...)` already tolerates an unconfigured project — it catches the `setupLocalRepo`
@@ -1445,7 +1450,46 @@ never nags on a project that has no repository. In the existing `catch` block ar
             gitConfigured = false;
 ```
 
-Add the polling methods:
+- [ ] **Step 4: Build the badge in `initStatusBar()`**
+
+Insert immediately after the existing `gitStatusBar.add(productionBadge);` line, so the badge sits beside the PRODUCTION badge. On a production gateway with drift both are visible — deliberately, since production is where a lingering reminder matters most:
+
+```java
+        // Pending-changes badge — shown after the user dismisses a commit prompt while the
+        // working tree is still dirty. Pulses so it reads as an outstanding action rather
+        // than decoration, and clears only when the changes are actually committed.
+        pendingChangesBadge = new JLabel(" UNCOMMITTED ");
+        pendingChangesBadge.setFont(new java.awt.Font("Dialog", java.awt.Font.BOLD, 10));
+        pendingChangesBadge.setForeground(java.awt.Color.WHITE);
+        pendingChangesBadge.setBackground(BADGE_DIM);
+        pendingChangesBadge.setOpaque(true);
+        pendingChangesBadge.setToolTipText("Uncommitted changes — click to commit");
+        pendingChangesBadge.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        pendingChangesBadge.setBorder(javax.swing.BorderFactory.createCompoundBorder(
+            javax.swing.BorderFactory.createLineBorder(new java.awt.Color(230, 145, 56), 1),
+            javax.swing.BorderFactory.createEmptyBorder(2, 6, 2, 6)
+        ));
+        pendingChangesBadge.setVisible(false);
+        pendingChangesBadge.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                // Clicking is an explicit request to see the prompt again for these changes.
+                dismissedRevision = DirtyStatePolicy.NEVER_DISMISSED;
+                applyDirtyState();
+            }
+        });
+        gitStatusBar.add(pendingChangesBadge);
+
+        pendingBadgePulseTimer = new Timer(700, e -> {
+            pulseBright = !pulseBright;
+            pendingChangesBadge.setBackground(pulseBright ? BADGE_BRIGHT : BADGE_DIM);
+            pendingChangesBadge.repaint();
+        });
+```
+
+- [ ] **Step 5: Add the poller and the badge updater**
+
+Add these methods to `DesignerHook`:
 
 ```java
     /**
@@ -1511,118 +1555,6 @@ Add the polling methods:
         updatePendingBadge();
     }
 
-    /** Placeholder until Task 7 adds the badge; keeps this task independently runnable. */
-    private void updatePendingBadge() {
-    }
-```
-
-Call `initRepoDirtyPolling();` at the end of `startup(...)`, immediately after `productionConfigRefreshTimer.start();`.
-
-- [ ] **Step 4: Kick an immediate check after a project save**
-
-In `notifyProjectSaveDone()`, a project save should not wait up to 5 seconds for the next tick. Add a kick at the top of the method, right after `super.notifyProjectSaveDone();`:
-
-```java
-        // A project save dirties the tree immediately; don't make the user wait for the poll.
-        SwingUtilities.invokeLater(this::checkRepoDirtyState);
-```
-
-The existing production save-warning logic below it is unchanged.
-
-- [ ] **Step 5: Stop the timer on shutdown**
-
-In `shutdown()`, alongside the existing timer cleanup:
-
-```java
-        if (repoDirtyTimer != null) {
-            repoDirtyTimer.stop();
-        }
-```
-
-- [ ] **Step 6: Verify the build**
-
-Run: `mvn -q clean package -DskipTests && mvn -q test`
-Expected: BUILD SUCCESS, all tests green.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add git-designer/src/main/java/com/axone_io/ignition/git/PendingChangesDialog.java \
-        git-designer/src/main/java/com/axone_io/ignition/git/managers/GitWorkflowPrompter.java \
-        git-designer/src/main/java/com/axone_io/ignition/git/DesignerHook.java
-git commit -m "feat(designer): prompt for a commit when the working tree drifts from HEAD"
-```
-
----
-
-### Task 7: Pulsing status-bar badge
-
-**Files:**
-- Modify: `git-designer/src/main/java/com/axone_io/ignition/git/DesignerHook.java`
-
-**Interfaces:**
-- Consumes: `DirtyStatePolicy.shouldShowBadge(RepoDirtyState, long)` from Task 1; the `updatePendingBadge()` placeholder and `lastKnownDirtyState` / `dismissedRevision` fields from Task 6.
-- Produces: nothing consumed by later tasks.
-
-- [ ] **Step 1: Add the badge fields**
-
-In `DesignerHook.java`, alongside `productionBadge`:
-
-```java
-    JLabel pendingChangesBadge;
-    Timer pendingBadgePulseTimer;
-    private boolean pulseBright = false;
-```
-
-- [ ] **Step 2: Build the badge in `initStatusBar()`**
-
-Insert immediately after the `gitStatusBar.add(productionBadge);` line, so it sits beside the PRODUCTION badge. On a production gateway with drift, both are visible — deliberately, since production is where a lingering reminder matters most:
-
-```java
-        // Pending-changes badge — shown after the user dismisses a commit prompt while the
-        // working tree is still dirty. Pulses so it reads as an outstanding action rather
-        // than decoration, and clears only when the changes are actually committed.
-        pendingChangesBadge = new JLabel(" UNCOMMITTED ");
-        pendingChangesBadge.setFont(new java.awt.Font("Dialog", java.awt.Font.BOLD, 10));
-        pendingChangesBadge.setForeground(java.awt.Color.WHITE);
-        pendingChangesBadge.setBackground(BADGE_DIM);
-        pendingChangesBadge.setOpaque(true);
-        pendingChangesBadge.setToolTipText("Uncommitted changes — click to commit");
-        pendingChangesBadge.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
-        pendingChangesBadge.setBorder(javax.swing.BorderFactory.createCompoundBorder(
-            javax.swing.BorderFactory.createLineBorder(new java.awt.Color(230, 145, 56), 1),
-            javax.swing.BorderFactory.createEmptyBorder(2, 6, 2, 6)
-        ));
-        pendingChangesBadge.setVisible(false);
-        pendingChangesBadge.addMouseListener(new java.awt.event.MouseAdapter() {
-            @Override
-            public void mouseClicked(java.awt.event.MouseEvent e) {
-                // Clicking is an explicit request to see the prompt again for these changes.
-                dismissedRevision = DirtyStatePolicy.NEVER_DISMISSED;
-                applyDirtyState();
-            }
-        });
-        gitStatusBar.add(pendingChangesBadge);
-
-        pendingBadgePulseTimer = new Timer(700, e -> {
-            pulseBright = !pulseBright;
-            pendingChangesBadge.setBackground(pulseBright ? BADGE_BRIGHT : BADGE_DIM);
-            pendingChangesBadge.repaint();
-        });
-```
-
-Add the two colour constants alongside the other fields:
-
-```java
-    private static final java.awt.Color BADGE_DIM = new java.awt.Color(191, 110, 0);
-    private static final java.awt.Color BADGE_BRIGHT = new java.awt.Color(245, 158, 11);
-```
-
-- [ ] **Step 3: Replace the `updatePendingBadge()` placeholder**
-
-Swap the empty method from Task 6 for the real one:
-
-```java
     private void updatePendingBadge() {
         if (pendingChangesBadge == null) {
             return;
@@ -1643,60 +1575,49 @@ Swap the empty method from Task 6 for the real one:
     }
 ```
 
-- [ ] **Step 4: Stop the pulse timer on shutdown**
+Call `initRepoDirtyPolling();` at the end of `startup(...)`, immediately after `productionConfigRefreshTimer.start();`.
 
-In `shutdown()`, alongside the other timer cleanup:
+- [ ] **Step 6: Kick an immediate check after a project save**
+
+In `notifyProjectSaveDone()`, a project save should not wait up to 5 seconds for the next tick. Add a kick immediately after `super.notifyProjectSaveDone();`:
 
 ```java
+        // A project save dirties the tree immediately; don't make the user wait for the poll.
+        SwingUtilities.invokeLater(this::checkRepoDirtyState);
+```
+
+The existing production save-warning logic below it is unchanged.
+
+- [ ] **Step 7: Stop both timers on shutdown**
+
+In `shutdown()`, alongside the existing timer cleanup:
+
+```java
+        if (repoDirtyTimer != null) {
+            repoDirtyTimer.stop();
+        }
         if (pendingBadgePulseTimer != null) {
             pendingBadgePulseTimer.stop();
         }
 ```
 
-- [ ] **Step 5: Verify the build**
+- [ ] **Step 8: Verify the build**
 
 Run: `mvn -q clean package -DskipTests && mvn -q test`
-Expected: BUILD SUCCESS, all tests green.
+Expected: BUILD SUCCESS, all tests green, `git-build/target/Git-unsigned.modl` produced.
 
-- [ ] **Step 6: Manual verification in the Designer**
-
-The Swing prompts and the pulse animation cannot be unit tested; verify them by hand. Deploy using the documented loop (set `IGNITION_GIT_MODULE_PATH` and `DEPLOYMENTS_PATH` first):
+- [ ] **Step 9: Commit**
 
 ```bash
-cd $IGNITION_GIT_MODULE_PATH && \
-mvn clean package -DskipTests && \
-docker cp git-build/target/Git-unsigned.modl whk-services-ignition-1:/usr/local/bin/ignition/user-lib/modules/ && \
-cd $DEPLOYMENTS_PATH && docker compose restart ignition
-```
-
-Restart the Designer afterwards to pick up the new module version, then walk through:
-
-1. Edit a single tag's value in the Tag Browser and click OK. Within ~10 s the prompt appears naming 1 tag change.
-2. Click **Not now**. The pulsing UNCOMMITTED badge appears in the status bar.
-3. Wait 30 s. No second prompt for the same changes.
-4. Edit a second tag. A new prompt appears (the change set, and so the revision, changed).
-5. Click **Commit** and complete the commit. The badge disappears within ~10 s.
-6. Click the badge while it is showing (after re-dirtying and dismissing). The prompt reopens.
-7. Rename a UDT so dozens of tags change. Exactly one prompt appears, not dozens.
-8. Run a **Pull** that changes tags. No prompt appears afterwards — this is the import-suppression path.
-9. Set `production_mode: true` in `git.yaml`, restart, and repeat step 1. The 4-checkbox `ProductionModePopup` appears instead, titled "Uncommitted Changes on Production Gateway", and the badge appears alongside the PRODUCTION badge after dismissal.
-
-Check the gateway log for watcher activity:
-
-```bash
-docker logs whk-services-ignition-1 2>&1 | grep -i "tag change watcher\|automatic tag export" | tail -20
-```
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add git-designer/src/main/java/com/axone_io/ignition/git/DesignerHook.java
-git commit -m "feat(designer): add pulsing uncommitted-changes status bar badge"
+git add git-designer/src/main/java/com/axone_io/ignition/git/PendingChangesDialog.java \
+        git-designer/src/main/java/com/axone_io/ignition/git/managers/GitWorkflowPrompter.java \
+        git-designer/src/main/java/com/axone_io/ignition/git/DesignerHook.java
+git commit -m "feat(designer): prompt and pulsing badge for uncommitted working-tree changes"
 ```
 
 ---
 
-### Task 8: Documentation
+### Task 7: Documentation
 
 **Files:**
 - Modify: `CLAUDE.md`
@@ -1784,5 +1705,35 @@ Before considering the feature complete:
 
 - [ ] `mvn clean package -DskipTests` succeeds and produces `git-build/target/Git-unsigned.modl`
 - [ ] `mvn test` passes, including the new `DirtyStatePolicyTest`, `ImportSuppressionTest`, and `TagChangeWatcherTest`
-- [ ] All nine manual Designer checks in Task 7 Step 6 pass, including the pull-suppression case
 - [ ] The gateway log shows the watcher registering at startup and no repeated export errors
+- [ ] The manual Designer walkthrough below passes
+
+### Manual Designer Walkthrough
+
+The Swing prompts and the pulse animation cannot be unit tested. Deploy with the documented
+loop (set `IGNITION_GIT_MODULE_PATH` and `DEPLOYMENTS_PATH` first):
+
+```bash
+cd $IGNITION_GIT_MODULE_PATH && \
+mvn clean package -DskipTests && \
+docker cp git-build/target/Git-unsigned.modl whk-services-ignition-1:/usr/local/bin/ignition/user-lib/modules/ && \
+cd $DEPLOYMENTS_PATH && docker compose restart ignition
+```
+
+Check the watcher registered:
+
+```bash
+docker logs whk-services-ignition-1 2>&1 | grep -i "tag change watcher\|automatic tag export" | tail -20
+```
+
+Restart the Designer to pick up the new module version, then walk through:
+
+1. Edit a single tag's value in the Tag Browser and click OK. Within ~10 s the prompt appears naming 1 tag change.
+2. Click **Not now**. The pulsing UNCOMMITTED badge appears in the status bar.
+3. Wait 30 s. No second prompt for the same changes.
+4. Edit a second tag. A new prompt appears (the change set, and so the revision, changed).
+5. Click **Commit** and complete the commit. The badge disappears within ~10 s.
+6. Re-dirty, dismiss, then click the badge. The prompt reopens.
+7. Rename a UDT so dozens of tags change. Exactly one prompt appears, not dozens.
+8. Run a **Pull** that changes tags. No prompt appears afterwards — this is the import-suppression path.
+9. Set `production_mode: true` in `git.yaml`, restart, and repeat step 1. The 4-checkbox `ProductionModePopup` appears instead, titled "Uncommitted Changes on Production Gateway", and the badge appears alongside the PRODUCTION badge after dismissal.
