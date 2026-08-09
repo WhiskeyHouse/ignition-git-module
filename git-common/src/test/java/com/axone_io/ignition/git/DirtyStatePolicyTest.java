@@ -9,13 +9,20 @@ import static org.junit.Assert.assertTrue;
 
 public class DirtyStatePolicyTest {
 
+    /** A state the gateway read successfully — the ordinary case. */
     private static RepoDirtyState state(long revision, boolean dirty, int tags, int project) {
         RepoDirtyState s = new RepoDirtyState();
         s.setRevision(revision);
         s.setDirty(dirty);
         s.setTagChangeCount(tags);
         s.setProjectChangeCount(project);
+        s.setKnown(true);
         return s;
+    }
+
+    /** What the gateway returns when the status read failed: clean-looking but not known. */
+    private static RepoDirtyState unknownState() {
+        return new RepoDirtyState();
     }
 
     @Test
@@ -57,22 +64,54 @@ public class DirtyStatePolicyTest {
     @Test
     public void badgeHidden_beforeAnyDismissal() {
         assertFalse(DirtyStatePolicy.shouldShowBadge(state(77L, true, 3, 0),
-                DirtyStatePolicy.NEVER_DISMISSED));
+                DirtyStatePolicy.NEVER_DISMISSED, false));
     }
 
     @Test
     public void badgeShown_afterDismissalWhileStillDirty() {
-        assertTrue(DirtyStatePolicy.shouldShowBadge(state(77L, true, 3, 0), 77L));
+        assertTrue(DirtyStatePolicy.shouldShowBadge(state(77L, true, 3, 0), 77L, false));
     }
 
     @Test
     public void badgeHidden_onceTreeIsClean() {
-        assertFalse(DirtyStatePolicy.shouldShowBadge(state(0L, false, 0, 0), 77L));
+        assertFalse(DirtyStatePolicy.shouldShowBadge(state(0L, false, 0, 0), 77L, true));
     }
 
     @Test
     public void badgeHidden_whenStateUnknown() {
-        assertFalse(DirtyStatePolicy.shouldShowBadge(null, 77L));
+        assertFalse(DirtyStatePolicy.shouldShowBadge(null, 77L, false));
+    }
+
+    @Test
+    public void unknownState_holdsBadgeThatWasShowing() {
+        // A failed git status must not retract a warning: the user would read the badge
+        // vanishing as "my changes were committed".
+        assertTrue(DirtyStatePolicy.shouldShowBadge(unknownState(), 77L, true));
+    }
+
+    @Test
+    public void unknownState_doesNotRaiseBadgeThatWasHidden() {
+        assertFalse(DirtyStatePolicy.shouldShowBadge(unknownState(), 77L, false));
+    }
+
+    @Test
+    public void unknownState_holdsBadgeEvenBeforeAnyDismissal() {
+        assertTrue(DirtyStatePolicy.shouldShowBadge(
+                unknownState(), DirtyStatePolicy.NEVER_DISMISSED, true));
+    }
+
+    @Test
+    public void unknownState_neverOpensADialog() {
+        RepoDirtyState s = unknownState();
+        s.setDirty(true);
+        s.setRevision(99L);
+        assertEquals(DirtyStatePolicy.Action.NOTHING,
+                DirtyStatePolicy.decide(s, DirtyStatePolicy.NEVER_DISMISSED, false));
+    }
+
+    @Test
+    public void freshlyDeserializedState_isNotKnown() {
+        assertFalse(new RepoDirtyState().isKnown());
     }
 
     @Test

@@ -9,6 +9,10 @@ import java.io.Serializable;
  * appearing, changing, or reverting produces a different revision, whatever caused it —
  * which is what lets the Designer distinguish "new changes since the user dismissed the
  * prompt" from "the same changes they already declined to commit".</p>
+ *
+ * <p>{@code known} distinguishes "the working tree is clean" from "the status read failed".
+ * It defaults to {@code false}, which is also the correct deserialization default: a state
+ * that never had a successful read behind it must not be believed.</p>
  */
 public class RepoDirtyState implements Serializable {
     private static final long serialVersionUID = 1L;
@@ -18,6 +22,7 @@ public class RepoDirtyState implements Serializable {
     private int projectChangeCount;
     private int tagChangeCount;
     private boolean productionMode;
+    private boolean known;
 
     /** Default constructor required for serialization. */
     public RepoDirtyState() {
@@ -26,6 +31,7 @@ public class RepoDirtyState implements Serializable {
         this.projectChangeCount = 0;
         this.tagChangeCount = 0;
         this.productionMode = false;
+        this.known = false;
     }
 
     public long getRevision() {
@@ -68,6 +74,15 @@ public class RepoDirtyState implements Serializable {
         this.productionMode = productionMode;
     }
 
+    /** Whether the working-tree status was actually read; {@code false} means "unknown". */
+    public boolean isKnown() {
+        return known;
+    }
+
+    public void setKnown(boolean known) {
+        this.known = known;
+    }
+
     /** Human-readable summary for dialogs, e.g. "4 tag changes, 2 project changes". */
     public String describeChanges() {
         StringBuilder sb = new StringBuilder();
@@ -90,6 +105,7 @@ public class RepoDirtyState implements Serializable {
                 ", dirty=" + dirty +
                 ", projectChangeCount=" + projectChangeCount +
                 ", tagChangeCount=" + tagChangeCount +
-                ", productionMode=" + productionMode + '}';
+                ", productionMode=" + productionMode +
+                ", known=" + known + '}';
     }
 }

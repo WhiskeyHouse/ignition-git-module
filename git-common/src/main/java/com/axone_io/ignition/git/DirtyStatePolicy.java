@@ -30,7 +30,8 @@ public final class DirtyStatePolicy {
      * @param promptOpen       whether a prompt dialog is currently showing
      */
     public static Action decide(RepoDirtyState state, long dismissedRevision, boolean promptOpen) {
-        if (state == null || !state.isDirty()) {
+        // An unknown state is not evidence of anything; never raise a dialog on it.
+        if (state == null || !state.isKnown() || !state.isDirty()) {
             return Action.NOTHING;
         }
         if (promptOpen) {
@@ -41,8 +42,22 @@ public final class DirtyStatePolicy {
                 : Action.BADGE_ONLY;
     }
 
-    /** The badge marks changes the user has seen and declined, and survives until committed. */
-    public static boolean shouldShowBadge(RepoDirtyState state, long dismissedRevision) {
+    /**
+     * The badge marks changes the user has seen and declined, and survives until committed.
+     *
+     * <p>A state whose status read failed is not "clean" — it is unknown, and retracting the
+     * badge on it would read to the user as "your changes were committed". On an unknown
+     * state the badge is held at whatever it already was until a successful read says
+     * otherwise, which is why the caller passes {@code currentlyShowing}.</p>
+     *
+     * @param currentlyShowing whether the badge is on screen right now
+     */
+    public static boolean shouldShowBadge(RepoDirtyState state,
+                                          long dismissedRevision,
+                                          boolean currentlyShowing) {
+        if (state != null && !state.isKnown()) {
+            return currentlyShowing;
+        }
         return state != null
                 && state.isDirty()
                 && dismissedRevision != NEVER_DISMISSED

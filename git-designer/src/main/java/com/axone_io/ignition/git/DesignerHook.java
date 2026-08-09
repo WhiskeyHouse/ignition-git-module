@@ -396,7 +396,8 @@ public class DesignerHook extends AbstractDesignerModuleHook {
         if (pendingChangesBadge == null) {
             return;
         }
-        boolean show = DirtyStatePolicy.shouldShowBadge(lastKnownDirtyState, dismissedRevision);
+        boolean show = DirtyStatePolicy.shouldShowBadge(
+                lastKnownDirtyState, dismissedRevision, pendingChangesBadge.isVisible());
         SwingUtilities.invokeLater(() -> {
             if (show == pendingChangesBadge.isVisible()) {
                 return;

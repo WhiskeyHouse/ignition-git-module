@@ -215,6 +215,22 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     public List<UncommittedChange> getUncommitedChangesImpl(String projectName, String userName) {
+        try {
+            return readUncommittedChanges(projectName);
+        } catch (Exception e) {
+            // Public contract preserved: callers of this RPC method have always received a
+            // (possibly empty) list rather than an exception.
+            logger.error(e.toString(), e);
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * Reads the working-tree status, propagating failure. {@link #getUncommitedChangesImpl}
+     * swallows it to keep its long-standing contract; {@link #getRepoDirtyStateImpl} needs to
+     * tell "clean" apart from "could not read", so it calls this directly.
+     */
+    private List<UncommittedChange> readUncommittedChanges(String projectName) throws Exception {
         Path projectPath = getProjectFolderPath(projectName);
         List<String> seenPaths = new ArrayList<>();
         List<UncommittedChange> result = new ArrayList<>();
@@ -237,8 +253,6 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             Set<String> modified = status.getChanged();
             logger.debug("Modified files: {}" + modified);
             collectUncommittedChanges(projectName, modified, "Modified", seenPaths, result);
-        } catch (Exception e) {
-            logger.error(e.toString(), e);
         }
 
         return result;
@@ -250,13 +264,14 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
         List<UncommittedChange> changes;
         try {
-            changes = getUncommitedChangesImpl(projectName, userName);
+            changes = readUncommittedChanges(projectName);
         } catch (Exception e) {
-            // A poller must never turn a transient git error into a popup. Report clean and
-            // let the next poll correct it.
+            // A poller must never turn a transient git error into a popup. Leave known=false:
+            // the Designer then holds the badge rather than reporting the tree clean.
             logger.debug("Unable to read working tree status for '" + projectName + "'", e);
             return state;
         }
+        state.setKnown(true);
 
         List<String> keys = new ArrayList<>();
         int tagCount = 0;
