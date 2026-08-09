@@ -216,9 +216,20 @@ public class GitTagManager {
 
     /**
      * Imports tags for the given project from the repository's {@code tags/} directory.
-     * Auto-detects whether the on-disk format is individual files or legacy single-file.
+     *
+     * <p>Runs under {@link ImportSuppression} so TagChangeWatcher ignores the tag
+     * resource events this import causes — otherwise a pull would immediately prompt the
+     * user to commit the changes it had just pulled.</p>
      */
     public static void importTagManager(String projectName, String collisionPolicyOverride) {
+        ImportSuppression.run(() -> importTagManagerInternal(projectName, collisionPolicyOverride));
+    }
+
+    /**
+     * Imports tags for the given project from the repository's {@code tags/} directory.
+     * Auto-detects whether the on-disk format is individual files or legacy single-file.
+     */
+    private static void importTagManagerInternal(String projectName, String collisionPolicyOverride) {
         logger.warn("Importing tags for project '" + projectName + "'. WARNING: This overwrites tag providers " +
                 "at the gateway level and will affect ALL projects sharing the same tag providers.");
         Path projectDir = getProjectFolderPath(projectName);
