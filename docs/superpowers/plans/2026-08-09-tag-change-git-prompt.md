@@ -460,7 +460,7 @@ public class ImportSuppressionTest {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `mvn -q -pl git-gateway -am test -Dtest=ImportSuppressionTest`
+Run: `mvn -q -pl git-gateway -am test -Dtest=ImportSuppressionTest -Dsurefire.failIfNoSpecifiedTests=false`
 Expected: FAIL — compilation error, `ImportSuppression` does not exist.
 
 - [ ] **Step 3: Write the guard**
@@ -513,7 +513,7 @@ public final class ImportSuppression {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `mvn -q -pl git-gateway -am test -Dtest=ImportSuppressionTest`
+Run: `mvn -q -pl git-gateway -am test -Dtest=ImportSuppressionTest -Dsurefire.failIfNoSpecifiedTests=false`
 Expected: PASS — 6 tests.
 
 - [ ] **Step 5: Wrap `importTagManager` in the guard**
@@ -741,7 +741,7 @@ public class TagChangeWatcherTest {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `mvn -q -pl git-gateway -am test -Dtest=TagChangeWatcherTest`
+Run: `mvn -q -pl git-gateway -am test -Dtest=TagChangeWatcherTest -Dsurefire.failIfNoSpecifiedTests=false`
 Expected: FAIL — compilation error, `TagChangeWatcher` does not exist.
 
 - [ ] **Step 3: Write the watcher core**
@@ -873,7 +873,7 @@ public class TagChangeWatcher {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `mvn -q -pl git-gateway -am test -Dtest=TagChangeWatcherTest`
+Run: `mvn -q -pl git-gateway -am test -Dtest=TagChangeWatcherTest -Dsurefire.failIfNoSpecifiedTests=false`
 Expected: PASS — 10 tests. The debounce tests use real short timers with latches, so they take a few seconds.
 
 - [ ] **Step 5: Commit**
