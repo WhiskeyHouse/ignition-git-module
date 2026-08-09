@@ -754,7 +754,9 @@ public class GitTagManager {
 
                 CompletableFuture<List<TagConfigurationModel>> cfTagModels =
                         tagProvider.getTagConfigsAsync(tagPaths, true, true);
-                List<TagConfigurationModel> tModels = cfTagModels.get();
+                // Bounded like the import path: an untimed get() on a stalled tag system would
+                // block the watcher's single export thread for the life of the gateway.
+                List<TagConfigurationModel> tModels = cfTagModels.get(30, TimeUnit.SECONDS);
 
                 JsonObject json = TagUtilities.toJsonObject(tModels.get(0));
                 JsonElement sortedJson = JsonUtilities.createDeterministicCopy(json);
@@ -773,6 +775,9 @@ public class GitTagManager {
                 // Walk the tag tree and write individual files
                 writeTagsRecursively(providerJson, providerDir, config.getExcludedTagPaths(), "");
             }
+
+            // An export that produced no providers is caught by describeProviderLoss before
+            // anything is published, so there is no deferred-clear bookkeeping to do here.
 
             // Write the config file (preserves user settings for next import)
             writeTagExportConfig(staging, config);
