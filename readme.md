@@ -243,6 +243,43 @@ imports **only tags**, from whatever is currently on disk.
 
 This supports multi-project import with project inheritance. See the [Docker example](docker/) in this repo for a working setup.
 
+### Designating which project exports gateway resources
+
+Tags, themes and images belong to the **gateway**, not to a project:
+
+| Export | Source |
+|--------|--------|
+| tags | `context.getTagManager().getTagProviders()` |
+| images | `context.getImageManager()` |
+| themes | `data/modules/com.inductiveautomation.perspective/themes` |
+
+The export, however, runs per project. On a gateway hosting more than one
+git-backed project, every project would write a complete copy of the same
+gateway state into its own repository and rewrite that copy on its own
+schedule — producing divergent snapshots of a single gateway.
+
+Exactly one project must be designated as the owner:
+
+```yaml
+  gateway_exportResources: true
+```
+
+Set it on **one** project per gateway. The module refuses to export gateway
+resources when no project claims them, or when more than one does; in both
+cases it logs the reason and continues, so project resources are still
+committed normally.
+
+> **Upgrading:** this defaults to `false`, so after upgrading, tags/themes/images
+> stop being exported until you designate an owner. That is deliberate — an
+> unconfigured gateway skipping the export is safe, whereas guessing an owner
+> reintroduces the competing-writer problem. Watch for the warning
+> `Not exporting gateway-scoped resources for project '<name>'` in the gateway
+> log and set the flag on your authoritative project.
+>
+> **Deployment order matters** for the same reason as `tags_importOnStartup`:
+> older module versions reject unknown `git.yaml` keys. Upgrade the module on
+> all gateways sharing a `git.yaml` before adding this key.
+
 ## Release Pipeline
 
 This project uses automated GitHub Actions workflows for building and releasing:
