@@ -161,11 +161,22 @@ public class GatewayHook extends AbstractGatewayModuleHook {
 
     @Override
     public void shutdown() {
+        if (tagResourceListener != null) {
+            // The ResourceCollection is owned by the gateway, not this module, so it outlives
+            // a module stop/restart. Leaving the listener registered would let a stale
+            // listener fire on the next tag/UDT edit after the executor below is shut down.
+            try {
+                context.getConfigurationManager().getConfigCollection()
+                        .removeResourceListener(tagResourceListener);
+            } catch (Exception e) {
+                logger.warn("Could not deregister the tag change watcher's resource listener.", e);
+            }
+        }
         if (tagChangeWatcher != null) {
             tagChangeWatcher.shutdown();
-            tagChangeWatcher = null;
-            tagResourceListener = null;
         }
+        tagChangeWatcher = null;
+        tagResourceListener = null;
         logger.info("shutdown()");
     }
 
