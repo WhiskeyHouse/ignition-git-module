@@ -154,6 +154,11 @@ public class GatewayHook extends AbstractGatewayModuleHook {
         } catch (Exception e) {
             logger.error("Could not register the tag change watcher. Tag and UDT edits will not "
                     + "automatically prompt for a commit; the Export button still works.", e);
+            if (tagChangeWatcher != null) {
+                // createDefault() may have succeeded before registration threw, in which case
+                // its scheduler thread is already running and would outlive this failure.
+                tagChangeWatcher.shutdown();
+            }
             tagChangeWatcher = null;
             tagResourceListener = null;
         }
