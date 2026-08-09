@@ -544,3 +544,40 @@ This was a known timing issue (fixed). If you encounter it:
 3. Restart the Designer and retry
 
 The fix ensures the completed pipeline result stays in memory until the progress dialog reads it.
+
+## Tag and UDT Change Prompting
+
+Tags are not project resources, so editing one in the Designer's Tag Browser does not
+trigger a project save — which means it would otherwise never enter the Git workflow.
+
+The gateway watches Ignition's config resources for tag and UDT changes. Five seconds
+after the last change in a burst, it exports tags to the working tree; the Designer polls
+for working-tree drift every five seconds and prompts.
+
+- **Production mode** — the same 4-checkbox safety checklist used for saves, titled
+  "Uncommitted Changes on Production Gateway". Proceeding opens the commit dialog, which
+  auto-pushes and triggers the hotfix workflow on the production branch.
+- **Non-production** — a lightweight dialog naming what changed, with Commit and Not now.
+
+Dismissing either prompt leaves a pulsing **UNCOMMITTED** badge in the status bar. It
+clears only when the changes are committed, and clicking it reopens the prompt. The same
+changes never prompt twice; editing something new prompts again.
+
+The prompt covers project changes as well as tag changes — the signal is "the working tree
+does not match HEAD", whatever caused it, including changes made by scripts, by the
+gateway web UI, or in another engineer's Designer session.
+
+### Automatic export on multi-project gateways
+
+Exporting tags writes every included provider's tags into the repository running the
+export, which is why the manual Export button asks for confirmation on a gateway tracking
+several projects. Automatic export has nobody to ask, so on a multi-project gateway it
+runs only for projects that have narrowed their scope via `includedProviders` in
+`tags/.tag-config.json`. Other projects are skipped with a logged warning; their manual
+Export button is unaffected. Single-project gateways always auto-export.
+
+### Module-initiated imports
+
+Pulls, gateway-startup tag imports, and commissioning imports write tags into the gateway's
+providers. These run under a suppression guard so they do not trigger a prompt to commit
+changes the module has just pulled.
