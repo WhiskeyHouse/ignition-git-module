@@ -47,6 +47,17 @@ public class GitCommissioningUtilsTest {
         assertEquals(Boolean.class, field.getType());
     }
 
+    /**
+     * A String field here would still parse, then silently coerce every value — including
+     * {@code false} — to a non-null truthy object, designating every project an owner.
+     */
+    @Test
+    public void gatewayExportResourcesKeyMapsToActualBooleanField() throws NoSuchFieldException {
+        String fieldName = GitCommissioningUtils.yamlKeyToFieldName("gateway_exportResources");
+        Field field = ProjectConfig.class.getDeclaredField(fieldName);
+        assertEquals(Boolean.class, field.getType());
+    }
+
     @Test
     public void unknownYamlKeyFailsLoudly() {
         try {

@@ -1,0 +1,61 @@
+---
+# Dedicated, self-contained rig for exercising the export-ownership and pull-policy fixes.
+#
+# Deliberately isolated from docker/docker-compose.yml: that stack commissions against real
+# WhiskeyHouse GitHub repositories with a live token, and these tests involve forcing divergence
+# and refusing pulls. Nothing here reaches the network beyond image pulls.
+services:
+  git-server:
+    build:
+      context: git-server
+    hostname: git-server
+    ports:
+      # Host-side only, for inspecting repos with a local git client.
+      - "3300:80"
+    volumes:
+      - git_repos:/srv/git
+    healthcheck:
+      # info/refs is what a git client actually asks for, so this proves the CGI path works
+      # rather than just that Apache is up.
+      test: ["CMD-SHELL", "git ls-remote http://localhost/git/owner-project.git >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks:
+      - default
+
+  gateway:
+    image: inductiveautomation/ignition:${IGNITION_VERSION:-8.3.3}
+    hostname: gateway
+    depends_on:
+      git-server:
+        condition: service_healthy
+    ports:
+      - "9188:8088"
+      - "9143:8043"
+    environment:
+      - ACCEPT_IGNITION_EULA=Y
+      - GATEWAY_ADMIN_USERNAME=${GATEWAY_ADMIN_USERNAME:-admin}
+      - GATEWAY_ADMIN_PASSWORD=${GATEWAY_ADMIN_PASSWORD:-password}
+      # The git server ignores credentials, but the module still resolves and sends them, so the
+      # username/password auth path is exercised exactly as it is in production.
+      - GATEWAY_GIT_USER_SECRET=${GATEWAY_GIT_USER_SECRET:-not-checked}
+      - IGNITION_EDITION=standard
+    volumes:
+      - gateway_data:/usr/local/bin/ignition/data
+      # Bind-mounted from the build output so `mvn package && docker compose restart gateway`
+      # picks up a new module without rebuilding an image.
+      - ../../git-build/target/Git-unsigned.modl:/usr/local/bin/ignition/user-lib/modules/Git-unsigned.modl:ro
+      - ./gw-init/git.yaml:/usr/local/bin/ignition/data/git.yaml:ro
+    command: >
+      -n Ignition-Git-TestRig
+    networks:
+      - default
+
+networks:
+  default:
+
+volumes:
+  gateway_data:
+  git_repos:

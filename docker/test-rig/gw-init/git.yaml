@@ -1,0 +1,32 @@
+# Two git-backed projects on one gateway — the configuration that made every project write a
+# competing copy of the same gateway-scoped resources into its own repository.
+#
+# Exactly one of them owns those resources. The other must refuse to export them.
+- repo_uri: http://git-server/git/owner-project.git
+  repo_branch: main
+  ignition_projectName: TestOwner
+  ignition_userName: admin
+  ignition_inheritable: false
+  user_name: rig
+  user_email: rig@example.invalid
+  user_password: not-checked
+  commissioning_importThemes: false
+  commissioning_importTags: false
+  commissioning_importImages: false
+  commissioning_enforceBranch: false
+  # The project designated to own tags, themes and images for this gateway.
+  gateway_exportResources: true
+
+- repo_uri: http://git-server/git/other-project.git
+  repo_branch: main
+  ignition_projectName: TestOther
+  ignition_userName: admin
+  ignition_inheritable: false
+  user_name: rig
+  user_email: rig@example.invalid
+  user_password: not-checked
+  commissioning_importThemes: false
+  commissioning_importTags: false
+  commissioning_importImages: false
+  commissioning_enforceBranch: false
+  # gateway_exportResources deliberately absent — this project must skip the gateway export.
