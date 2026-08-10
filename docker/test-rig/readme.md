@@ -33,9 +33,28 @@ sends credentials, so the path under test is unchanged.
 
 ```bash
 cd docker/test-rig
+./deploy.sh                       # build the module and copy it into the rig
 docker compose up -d              # first run pulls the Ignition image
 docker compose logs -f gateway    # watch commissioning
 ```
+
+Startup is zero-touch — no commissioning clicks. That takes three separate settings,
+because Ignition 8.3 gates a module three ways and the UI can only clear one of them:
+
+| Gate | Cleared by | Why the UI cannot |
+|------|-----------|-------------------|
+| Unsigned module | `-Dignition.allowunsignedmodules=true` (`gateway/Dockerfile`) | not a commissioning step |
+| Certificate acceptance | `ACCEPT_MODULE_CERTS` env var | `Git-unsigned.modl` has no `certificates.p7b`, so the UI shows "Trust Certificates: 0" — nothing to accept |
+| Licence agreement | `ACCEPT_MODULE_LICENSES` env var | the UI step works, but does not persist to the `EULAS` table |
+
+`ModuleUtil.certificateAccepted` / `.licenseAccepted` short-circuit to `true` when the module id
+appears in those variables. Developer mode alone is **not** enough — it only waives the signature
+check, and the module is still quarantined for "certificate not yet accepted".
+
+> **This matters beyond the rig.** The same three gates apply to any freshly commissioned 8.3
+> gateway. An existing gateway that already accepted the module keeps working, but rebuild it —
+> or stand up a new one — and the module will not load without either signing it or setting these
+> variables.
 
 Gateway UI: <http://localhost:9188> — `admin` / `password`.
 

@@ -15,6 +15,7 @@ export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
 
 seed_repo() {
     name="$1"
+    project="$2"
     bare="$ROOT/$name.git"
 
     if [ -d "$bare" ]; then
@@ -30,6 +31,19 @@ seed_repo() {
     work=$(mktemp -d)
     git init --initial-branch=main "$work" >/dev/null
     printf '# %s\n\nSeeded by the ignition-git-module test rig.\n' "$name" > "$work/README.md"
+    # Ignition needs a project manifest to import the checkout as a project. Without it,
+    # GitProjectManager.loadProjectManifest throws NoSuchFileException and commissioning aborts
+    # for every project that would have followed.
+    cat > "$work/project.json" <<JSON
+{
+  "title": "${project}",
+  "description": "ignition-git-module test rig",
+  "parent": "",
+  "enabled": true,
+  "inheritable": false,
+  "attributes": {}
+}
+JSON
     # A tags/ tree so the export has something to be compared against, and so the completeness
     # guard has a prior state to protect.
     mkdir -p "$work/tags"
@@ -40,8 +54,8 @@ seed_repo() {
     rm -rf "$work"
 }
 
-seed_repo owner-project
-seed_repo other-project
+seed_repo owner-project TestOwner
+seed_repo other-project TestOther
 
 chown -R www-data:www-data "$ROOT" 2>/dev/null || true
 echo "[init-repos] done"
