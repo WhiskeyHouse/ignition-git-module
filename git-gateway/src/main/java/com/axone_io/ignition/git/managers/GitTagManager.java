@@ -216,9 +216,20 @@ public class GitTagManager {
 
     /**
      * Imports tags for the given project from the repository's {@code tags/} directory.
-     * Auto-detects whether the on-disk format is individual files or legacy single-file.
+     *
+     * <p>Runs under {@link ImportSuppression} so TagChangeWatcher ignores the tag
+     * resource events this import causes — otherwise a pull would immediately prompt the
+     * user to commit the changes it had just pulled.</p>
      */
     public static void importTagManager(String projectName, String collisionPolicyOverride) {
+        ImportSuppression.run(() -> importTagManagerInternal(projectName, collisionPolicyOverride));
+    }
+
+    /**
+     * Imports tags for the given project from the repository's {@code tags/} directory.
+     * Auto-detects whether the on-disk format is individual files or legacy single-file.
+     */
+    private static void importTagManagerInternal(String projectName, String collisionPolicyOverride) {
         logger.warn("Importing tags for project '" + projectName + "'. WARNING: This overwrites tag providers " +
                 "at the gateway level and will affect ALL projects sharing the same tag providers.");
         Path projectDir = getProjectFolderPath(projectName);
@@ -743,7 +754,9 @@ public class GitTagManager {
 
                 CompletableFuture<List<TagConfigurationModel>> cfTagModels =
                         tagProvider.getTagConfigsAsync(tagPaths, true, true);
-                List<TagConfigurationModel> tModels = cfTagModels.get();
+                // Bounded like the import path: an untimed get() on a stalled tag system would
+                // block the watcher's single export thread for the life of the gateway.
+                List<TagConfigurationModel> tModels = cfTagModels.get(30, TimeUnit.SECONDS);
 
                 JsonObject json = TagUtilities.toJsonObject(tModels.get(0));
                 JsonElement sortedJson = JsonUtilities.createDeterministicCopy(json);
@@ -762,6 +775,9 @@ public class GitTagManager {
                 // Walk the tag tree and write individual files
                 writeTagsRecursively(providerJson, providerDir, config.getExcludedTagPaths(), "");
             }
+
+            // An export that produced no providers is caught by describeProviderLoss before
+            // anything is published, so there is no deferred-clear bookkeeping to do here.
 
             // Write the config file (preserves user settings for next import)
             writeTagExportConfig(staging, config);

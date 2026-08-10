@@ -9,6 +9,7 @@ interface GitProject {
   productionMode?: boolean;
   productionBranch?: string | null;
   productionTagPattern?: string | null;
+  exportGatewayResources?: boolean;
 }
 
 interface State {
@@ -67,6 +68,7 @@ export class GitProjectsConfig extends Component<{}, State> {
         productionMode: false,
         productionBranch: '',
         productionTagPattern: '',
+        exportGatewayResources: false,
       },
       isNew: true
     });
@@ -157,6 +159,26 @@ export class GitProjectsConfig extends Component<{}, State> {
               />
               <small>Use https:// for username/password or git@github.com: for SSH</small>
             </div>
+            <fieldset className="form-fieldset">
+              <legend>Gateway Resources</legend>
+              <div className="form-group">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={!!editing.exportGatewayResources}
+                    onChange={(e) => this.handleChange('exportGatewayResources', e.target.checked)}
+                  />
+                  {' '}This project owns the gateway's tags, themes and images
+                </label>
+                <small>
+                  Tags, themes and images belong to the gateway, not to a project, but they are
+                  exported per project. Enable this on exactly one project so a single repository
+                  owns them. Leave it off everywhere and they are never exported — project
+                  resources still commit as normal.
+                </small>
+              </div>
+            </fieldset>
+
             <fieldset className="form-fieldset">
               <legend>Production Mode</legend>
               <div className="form-group">

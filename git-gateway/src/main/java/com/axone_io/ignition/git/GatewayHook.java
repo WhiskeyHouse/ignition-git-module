@@ -1,6 +1,8 @@
 package com.axone_io.ignition.git;
 
 import com.axone_io.ignition.git.commissioning.utils.GitCommissioningUtils;
+import com.axone_io.ignition.git.managers.ImportSuppression;
+import com.axone_io.ignition.git.managers.TagChangeWatcher;
 import com.axone_io.ignition.git.records.GitProjectsConfigRecord;
 import com.axone_io.ignition.git.records.GitReposUsersRecord;
 import com.inductiveautomation.ignition.common.BundleUtil;
@@ -23,8 +25,15 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     static public String MODULE_NAME = "Git";
     private final Logger logger = LoggerFactory.getLogger(getClass());
 
-    private GatewayScriptModule scriptModule;
+    private static GatewayScriptModule scriptModule;
     public static GatewayContext context;
+
+    private TagChangeWatcher tagChangeWatcher;
+    private com.inductiveautomation.ignition.common.resourcecollection.ResourceListener tagResourceListener;
+
+    public static GatewayScriptModule getScriptModule() {
+        return scriptModule;
+    }
 
 
     @Override
@@ -126,12 +135,62 @@ public class GatewayHook extends AbstractGatewayModuleHook {
     public void startup(LicenseState licenseState) {
         GitCommissioningUtils.loadConfiguration();
         GitCommissioningUtils.startTagImportOnStartup();
+        startTagChangeWatcher();
 
         logger.info("startup()");
     }
 
+    /**
+     * Watches Ignition's config resources for tag and UDT changes. Tags are not project
+     * resources, so the Designer's project-save hook never sees them — without this, tag
+     * edits would silently never reach git.
+     */
+    private void startTagChangeWatcher() {
+        try {
+            tagChangeWatcher = TagChangeWatcher.createDefault();
+            tagResourceListener = tagChangeWatcher.asResourceListener();
+            context.getConfigurationManager().getConfigCollection()
+                    .addResourceListener(tagResourceListener);
+            logger.info("Tag change watcher registered.");
+        } catch (Exception e) {
+            logger.error("Could not register the tag change watcher. Tag and UDT edits will not "
+                    + "automatically prompt for a commit; the Export button still works.", e);
+            if (tagChangeWatcher != null) {
+                // createDefault() may have succeeded before registration threw, in which case
+                // its scheduler thread is already running and would outlive this failure.
+                tagChangeWatcher.shutdown();
+            }
+            tagChangeWatcher = null;
+            tagResourceListener = null;
+        }
+    }
+
     @Override
     public void shutdown() {
+        if (tagResourceListener != null) {
+            // The ResourceCollection is owned by the gateway, not this module, so it outlives
+            // a module stop/restart. Leaving the listener registered would let a stale
+            // listener fire on the next tag/UDT edit after the executor below is shut down.
+            try {
+                context.getConfigurationManager().getConfigCollection()
+                        .removeResourceListener(tagResourceListener);
+            } catch (Exception e) {
+                logger.warn("Could not deregister the tag change watcher's resource listener.", e);
+            }
+        }
+        if (tagChangeWatcher != null) {
+            tagChangeWatcher.shutdown();
+        }
+        tagChangeWatcher = null;
+        tagResourceListener = null;
+        try {
+            // Static singleton, not owned by this instance, but its release thread is created
+            // lazily on the first pull and would otherwise pin this classloader across a
+            // hot-deploy for the rest of the JVM's life.
+            ImportSuppression.shutdown();
+        } catch (Exception e) {
+            logger.warn("Could not shut down the import suppression release thread.", e);
+        }
         logger.info("shutdown()");
     }
 

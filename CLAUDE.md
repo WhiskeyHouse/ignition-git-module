@@ -78,6 +78,11 @@ Scope Legend: **C** = Client (Vision), **D** = Designer, **G** = Gateway
 | `PendingProductionCommit` | git-designer | Commit details authorised at save-start, executed at save-done |
 | `HotfixCommitDialog` | git-designer | Hotfix commit dialog (description, message, changes) |
 | `HotfixProgressDialog` | git-designer | Real-time pipeline progress with clickable PR link |
+| `TagChangeWatcher` | git-gateway | Debounced tag/UDT resource listener; exports tags to the working tree |
+| `ImportSuppression` | git-gateway | Guard disabling the watcher during module-initiated tag imports |
+| `DirtyStatePolicy` | git-common | Decides prompt vs badge vs nothing for working-tree drift |
+| `GitWorkflowPrompter` | git-designer | Routes the uncommitted-changes prompt by production mode |
+| `PendingChangesDialog` | git-designer | Non-production "commit now?" dialog |
 
 ### Data Transfer Objects (DTOs)
 
@@ -87,6 +92,7 @@ Scope Legend: **C** = Client (Vision), **D** = Designer, **G** = Gateway
 - `UncommittedChange` - Changed file info (path, type, actor)
 - `ProductionModeConfig` - Production mode settings and validation state
 - `HotfixResult` - Hotfix pipeline step statuses, PR URL, errors
+- `RepoDirtyState` - Working-tree drift summary (revision hash, dirty flag, change counts, production mode)
 
 ## RPC Considerations
 

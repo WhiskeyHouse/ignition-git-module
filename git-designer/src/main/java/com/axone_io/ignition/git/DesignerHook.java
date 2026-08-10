@@ -1,9 +1,12 @@
 package com.axone_io.ignition.git;
 
 import com.axone_io.ignition.git.actions.GitBaseAction;
+import com.axone_io.ignition.git.DirtyStatePolicy;
 import com.axone_io.ignition.git.dto.ProductionModeConfig;
+import com.axone_io.ignition.git.dto.RepoDirtyState;
 import com.axone_io.ignition.git.managers.DocsPopupMenuListener;
 import com.axone_io.ignition.git.managers.GitActionManager;
+import com.axone_io.ignition.git.managers.GitWorkflowPrompter;
 import com.axone_io.ignition.git.utils.IconUtils;
 import com.inductiveautomation.ignition.client.gateway_interface.GatewayConnection;
 import com.inductiveautomation.ignition.common.BundleUtil;
@@ -51,6 +54,25 @@ public class DesignerHook extends AbstractDesignerModuleHook {
     // (which Ignition dispatches on a separate executor thread).
     private static volatile PendingProductionCommit pendingProductionCommit;
     private Timer productionConfigRefreshTimer;
+
+    Timer repoDirtyTimer;
+    JLabel pendingChangesBadge;
+    Timer pendingBadgePulseTimer;
+    private boolean pulseBright = false;
+    private RepoDirtyState lastKnownDirtyState;
+    private long dismissedRevision = DirtyStatePolicy.NEVER_DISMISSED;
+    /**
+     * Set when a production save completes, cleared by the first poll that sees the resulting
+     * drift. Written on the save thread and read on the EDT, hence volatile.
+     *
+     * @see DirtyStatePolicy#resolveDismissedRevision
+     */
+    private volatile boolean dismissDriftAfterSave = false;
+    private boolean dirtyCheckInFlight = false;
+    private boolean gitConfigured = true;
+
+    private static final java.awt.Color BADGE_DIM = new java.awt.Color(191, 110, 0);
+    private static final java.awt.Color BADGE_BRIGHT = new java.awt.Color(245, 158, 11);
 
     @Override
     public void initializeScriptManager(ScriptManager manager) {
@@ -108,6 +130,7 @@ public class DesignerHook extends AbstractDesignerModuleHook {
                         projectName, userName, e.getMessage());
             logger.debug("Git setup error details:", e);
             // Continue - module loads but Git features may not be fully functional
+            gitConfigured = false;
         }
 
         initStatusBar();
@@ -118,6 +141,8 @@ public class DesignerHook extends AbstractDesignerModuleHook {
         refreshProductionConfig();
         productionConfigRefreshTimer = new Timer(300000, e -> refreshProductionConfig()); // 5 minutes
         productionConfigRefreshTimer.start();
+
+        initRepoDirtyPolling();
     }
 
     private void initStatusBar(){
@@ -155,6 +180,37 @@ public class DesignerHook extends AbstractDesignerModuleHook {
         ));
         productionBadge.setVisible(false); // Hidden by default, shown after config check
         gitStatusBar.add(productionBadge);
+
+        // Pending-changes badge — shown after the user dismisses a commit prompt while the
+        // working tree is still dirty. Pulses so it reads as an outstanding action rather
+        // than decoration, and clears only when the changes are actually committed.
+        pendingChangesBadge = new JLabel(" UNCOMMITTED ");
+        pendingChangesBadge.setFont(new java.awt.Font("Dialog", java.awt.Font.BOLD, 10));
+        pendingChangesBadge.setForeground(java.awt.Color.WHITE);
+        pendingChangesBadge.setBackground(BADGE_DIM);
+        pendingChangesBadge.setOpaque(true);
+        pendingChangesBadge.setToolTipText("Uncommitted changes — click to commit");
+        pendingChangesBadge.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        pendingChangesBadge.setBorder(javax.swing.BorderFactory.createCompoundBorder(
+            javax.swing.BorderFactory.createLineBorder(new java.awt.Color(230, 145, 56), 1),
+            javax.swing.BorderFactory.createEmptyBorder(2, 6, 2, 6)
+        ));
+        pendingChangesBadge.setVisible(false);
+        pendingChangesBadge.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                // Clicking is an explicit request to see the prompt again for these changes.
+                dismissedRevision = DirtyStatePolicy.NEVER_DISMISSED;
+                applyDirtyState();
+            }
+        });
+        gitStatusBar.add(pendingChangesBadge);
+
+        pendingBadgePulseTimer = new Timer(700, e -> {
+            pulseBright = !pulseBright;
+            pendingChangesBadge.setBackground(pulseBright ? BADGE_BRIGHT : BADGE_DIM);
+            pendingChangesBadge.repaint();
+        });
 
         statusBar.addDisplay(gitStatusBar);
 
@@ -281,6 +337,97 @@ public class DesignerHook extends AbstractDesignerModuleHook {
     }
 
     /**
+     * Polls working-tree drift. Tag and UDT edits never reach the project-save hook, so
+     * polling is the only way the Designer learns about them.
+     */
+    private void initRepoDirtyPolling() {
+        if (!gitConfigured) {
+            logger.info("Git is not configured for project '{}'; not polling for uncommitted changes.",
+                    projectName);
+            return;
+        }
+        repoDirtyTimer = new Timer(5000, e -> checkRepoDirtyState());
+        repoDirtyTimer.start();
+    }
+
+    private void checkRepoDirtyState() {
+        if (!gitConfigured || dirtyCheckInFlight || GitWorkflowPrompter.isPromptOpen()) {
+            return;
+        }
+        dirtyCheckInFlight = true;
+
+        SwingWorker<RepoDirtyState, Void> worker = new SwingWorker<RepoDirtyState, Void>() {
+            @Override
+            protected RepoDirtyState doInBackground() {
+                return rpc.getRepoDirtyState(projectName, userName);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    RepoDirtyState state = get();
+                    if (state != null) {
+                        lastKnownDirtyState = state;
+                    }
+                } catch (Exception ex) {
+                    // Fail quiet: a background poller must not turn a flapping connection into
+                    // repeated dialogs. The save-time production warning still fails
+                    // conservative, so the moment that changes a gateway stays guarded.
+                    logger.debug("Unable to poll repository state: {}", ex.getMessage());
+                } finally {
+                    dirtyCheckInFlight = false;
+                    applyDirtyState();
+                }
+            }
+        };
+        worker.execute();
+    }
+
+    private void applyDirtyState() {
+        RepoDirtyState state = lastKnownDirtyState;
+
+        // First poll after a production save carries the change set the checklist showed.
+        long resolved = DirtyStatePolicy.resolveDismissedRevision(
+                state, dismissedRevision, dismissDriftAfterSave);
+        if (resolved != dismissedRevision) {
+            dismissedRevision = resolved;
+            dismissDriftAfterSave = false;
+        }
+
+        DirtyStatePolicy.Action action =
+                DirtyStatePolicy.decide(state, dismissedRevision, GitWorkflowPrompter.isPromptOpen());
+
+        if (action == DirtyStatePolicy.Action.PROMPT) {
+            long revision = state.getRevision();
+            GitWorkflowPrompter.prompt(state, projectName, userName, () -> {
+                dismissedRevision = revision;
+                updatePendingBadge();
+            });
+        }
+        updatePendingBadge();
+    }
+
+    private void updatePendingBadge() {
+        if (pendingChangesBadge == null) {
+            return;
+        }
+        boolean show = DirtyStatePolicy.shouldShowBadge(
+                lastKnownDirtyState, dismissedRevision, pendingChangesBadge.isVisible());
+        SwingUtilities.invokeLater(() -> {
+            if (show == pendingChangesBadge.isVisible()) {
+                return;
+            }
+            pendingChangesBadge.setVisible(show);
+            if (show) {
+                pendingBadgePulseTimer.start();
+            } else {
+                pendingBadgePulseTimer.stop();
+                pendingChangesBadge.setBackground(BADGE_DIM);
+            }
+        });
+    }
+
+    /**
      * Production gate for saves.
      *
      * <p>Saving is the moment the production gateway actually changes, and
@@ -370,6 +517,19 @@ public class DesignerHook extends AbstractDesignerModuleHook {
 
         PendingProductionCommit authorised = pendingProductionCommit;
         pendingProductionCommit = null;
+
+        // Only a production save has already shown the user its changes, in the safety checklist,
+        // so only it suppresses the poller's prompt — an ordinary save should still raise the
+        // usual "commit now?" dialog. Arming here rather than at the checklist means an aborted
+        // save (which never reaches this method) can never leave a dismissal armed for whatever
+        // drift happens to come next.
+        if (authorised != null) {
+            dismissDriftAfterSave = true;
+        }
+
+        // A project save dirties the tree immediately; don't make the user wait for the poll.
+        SwingUtilities.invokeLater(this::checkRepoDirtyState);
+
         if (authorised == null) {
             return;
         }
@@ -400,6 +560,13 @@ public class DesignerHook extends AbstractDesignerModuleHook {
 
         if (productionConfigRefreshTimer != null) {
             productionConfigRefreshTimer.stop();
+        }
+
+        if (repoDirtyTimer != null) {
+            repoDirtyTimer.stop();
+        }
+        if (pendingBadgePulseTimer != null) {
+            pendingBadgePulseTimer.stop();
         }
 
         if (sharedPopupMenuRef != null && docsPopupListener != null) {

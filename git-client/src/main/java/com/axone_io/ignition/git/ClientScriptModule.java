@@ -2,6 +2,7 @@ package com.axone_io.ignition.git;
 
 import com.axone_io.ignition.git.dto.HotfixResult;
 import com.axone_io.ignition.git.dto.ProductionModeConfig;
+import com.axone_io.ignition.git.dto.RepoDirtyState;
 
 import java.util.List;
 
@@ -37,6 +38,11 @@ public class ClientScriptModule extends AbstractScriptModule {
     @Override
     protected List<UncommittedChange> getUncommitedChangesImpl(String projectName, String userName) {
         return rpc.getUncommitedChanges(projectName, userName);
+    }
+
+    @Override
+    protected RepoDirtyState getRepoDirtyStateImpl(String projectName, String userName) {
+        return rpc.getRepoDirtyState(projectName, userName);
     }
 
     @Override

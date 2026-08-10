@@ -2,6 +2,7 @@ package com.axone_io.ignition.git;
 
 import com.axone_io.ignition.git.dto.HotfixResult;
 import com.axone_io.ignition.git.dto.ProductionModeConfig;
+import com.axone_io.ignition.git.dto.RepoDirtyState;
 import com.inductiveautomation.ignition.common.rpc.RpcInterface;
 import java.util.List;
 
@@ -13,6 +14,13 @@ public interface GitScriptInterface {
     boolean push(String projectName, String userName) throws Exception;
     boolean commit(String projectName, String userName, String[] changes, String message);
     List<UncommittedChange> getUncommitedChanges(String projectName, String userName);
+
+    /**
+     * Summarises how far the working tree has drifted from HEAD. Polled by the Designer to
+     * decide whether to prompt for a commit; never throws, returning a clean state instead,
+     * because a background poller must not surface transient errors as dialogs.
+     */
+    RepoDirtyState getRepoDirtyState(String projectName, String userName);
     boolean isRegisteredUser(String projectName, String userName);
     boolean exportConfig(String projectName);
     void setupLocalRepo(String projectName, String userName) throws Exception;

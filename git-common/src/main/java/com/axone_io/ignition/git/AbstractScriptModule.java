@@ -2,6 +2,7 @@ package com.axone_io.ignition.git;
 
 import com.axone_io.ignition.git.dto.HotfixResult;
 import com.axone_io.ignition.git.dto.ProductionModeConfig;
+import com.axone_io.ignition.git.dto.RepoDirtyState;
 import com.inductiveautomation.ignition.common.BundleUtil;
 
 import java.util.List;
@@ -43,6 +44,12 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
     public List<UncommittedChange> getUncommitedChanges(String projectName,
                                                         String userName) {
         return getUncommitedChangesImpl(projectName, userName);
+    }
+
+    @Override
+    public RepoDirtyState getRepoDirtyState(String projectName,
+                                            String userName) {
+        return getRepoDirtyStateImpl(projectName, userName);
     }
 
     @Override
@@ -232,6 +239,7 @@ public abstract class AbstractScriptModule implements GitScriptInterface {
     protected abstract boolean pushImpl(String projectName, String userName) throws Exception;
     protected abstract boolean commitImpl(String projectName, String userName, String[] changes, String message);
     protected abstract List<UncommittedChange> getUncommitedChangesImpl(String projectName, String userName);
+    protected abstract RepoDirtyState getRepoDirtyStateImpl(String projectName, String userName);
     protected abstract boolean isRegisteredUserImpl(String projectName, String userName);
     protected abstract boolean exportConfigImpl(String projectName);
     protected abstract void setupLocalRepoImpl(String projectName, String userName) throws Exception;

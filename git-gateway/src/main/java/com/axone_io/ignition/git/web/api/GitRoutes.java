@@ -176,6 +176,7 @@ public class GitRoutes {
                         obj.addProperty("productionMode", p.getProductionMode());
                         obj.addProperty("productionBranch", p.getProductionBranch());
                         obj.addProperty("productionTagPattern", p.getProductionTagPattern());
+                        obj.addProperty("exportGatewayResources", p.isExportGatewayResources());
                         return obj;
                     })
                     .collect(Collectors.toList());
@@ -209,6 +210,7 @@ public class GitRoutes {
             obj.addProperty("productionMode", project.getProductionMode());
             obj.addProperty("productionBranch", project.getProductionBranch());
             obj.addProperty("productionTagPattern", project.getProductionTagPattern());
+            obj.addProperty("exportGatewayResources", project.isExportGatewayResources());
             return obj;
         } catch (Exception e) {
             logger.error("Error fetching project", e);
@@ -271,6 +273,7 @@ public class GitRoutes {
             record.setProjectName(projectName);
             record.setURI(uri);
             applyProductionFields(record, body);
+            applyGatewayResourceOwnership(record, body);
 
             req.getGatewayContext().getPersistenceInterface().save(record);
 
@@ -282,6 +285,7 @@ public class GitRoutes {
             response.addProperty("productionMode", record.getProductionMode());
             response.addProperty("productionBranch", record.getProductionBranch());
             response.addProperty("productionTagPattern", record.getProductionTagPattern());
+            response.addProperty("exportGatewayResources", record.isExportGatewayResources());
             return response;
         } catch (Exception e) {
             logger.error("Error creating project", e);
@@ -352,6 +356,7 @@ public class GitRoutes {
             record.setProjectName(projectName);
             record.setURI(uri);
             applyProductionFields(record, body);
+            applyGatewayResourceOwnership(record, body);
 
             req.getGatewayContext().getPersistenceInterface().save(record);
 
@@ -362,6 +367,7 @@ public class GitRoutes {
             response.addProperty("productionMode", record.getProductionMode());
             response.addProperty("productionBranch", record.getProductionBranch());
             response.addProperty("productionTagPattern", record.getProductionTagPattern());
+            response.addProperty("exportGatewayResources", record.isExportGatewayResources());
             return response;
         } catch (Exception e) {
             logger.error("Error updating project", e);
@@ -397,6 +403,24 @@ public class GitRoutes {
             JsonObject error = new JsonObject();
             error.addProperty("error", e.getMessage());
             return error;
+        }
+    }
+
+    /**
+     * Applies the gateway-resource ownership flag.
+     *
+     * <p>Tags, themes and images are gateway-scoped but exported per project, so exactly one
+     * project may own them — see {@link com.axone_io.ignition.git.GatewayResourceExportPolicy}.
+     * This is settable from the config page as well as {@code git.yaml} so an operator can fix
+     * ownership without editing a file and restarting the gateway.</p>
+     *
+     * <p>Deliberately does not reject a second claimant here: the policy reports ambiguous
+     * ownership and skips the export, which is safer than letting a validation error block an
+     * operator from moving ownership between projects one edit at a time.</p>
+     */
+    private static void applyGatewayResourceOwnership(GitProjectsConfigRecord record, JsonObject body) {
+        if (body.has("exportGatewayResources") && body.get("exportGatewayResources").isJsonPrimitive()) {
+            record.setExportGatewayResources(body.get("exportGatewayResources").getAsBoolean());
         }
     }
 
