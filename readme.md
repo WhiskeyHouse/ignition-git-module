@@ -1,5 +1,7 @@
 # Ignition Git Module
 
+[Documentation](https://whiskeyhouse.github.io/ignition-git-module/) · [Releases](https://github.com/WhiskeyHouse/ignition-git-module/releases) · [Issues](https://github.com/WhiskeyHouse/ignition-git-module/issues)
+
 [![License](https://img.shields.io/badge/license-Beerware-green.svg)](LICENSE.md)
 
 A free Ignition module that embeds a full-featured Git client directly into the Ignition Designer. Manage commits, branches, merges, stashes, and gateway configuration — all without leaving the IDE.
