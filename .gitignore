@@ -59,3 +59,8 @@ git-gateway/src/main/resources/mounted/*.js.LICENSE.txt
 
 # Claude Code local settings (contains machine-specific paths)
 .claude/
+
+# Documentation site
+/website/node_modules/
+/website/build/
+/website/.docusaurus/
