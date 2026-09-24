@@ -23,6 +23,16 @@ public class GitProjectsConfigRecord extends PersistentRecord {
     public static final StringField URI =
             new StringField(META, "URI", SFieldFlags.SMANDATORY, SFieldFlags.SDESCRIPTIVE);
     public static final BooleanField ProductionMode = new BooleanField(META, "ProductionMode");
+    /**
+     * Marks this project as the owner of gateway-scoped resources (tags, themes, images).
+     *
+     * <p>Those resources belong to the gateway, not to any one project, but the export runs per
+     * project — so without an owner every git-backed project writes a competing copy of the same
+     * gateway state into its own repository. Exactly one project should have this set; the module
+     * refuses to export gateway resources when zero or more than one project claims them.</p>
+     */
+    public static final BooleanField ExportGatewayResources =
+            new BooleanField(META, "ExportGatewayResources").setDefault(false);
     public static final StringField ProductionBranch = new StringField(META, "ProductionBranch");
     public static final StringField ProductionTagPattern = new StringField(META, "ProductionTagPattern");
     public static final StringField LastHotfixStatus = new StringField(META, "LastHotfixStatus");
@@ -53,6 +63,14 @@ public class GitProjectsConfigRecord extends PersistentRecord {
 
     public void setURI(String uri) {
         setString(URI, uri);
+    }
+
+    public boolean isExportGatewayResources() {
+        return this.getBoolean(ExportGatewayResources);
+    }
+
+    public void setExportGatewayResources(boolean exportGatewayResources) {
+        setBoolean(ExportGatewayResources, exportGatewayResources);
     }
 
     public boolean isSSHAuthentication() {

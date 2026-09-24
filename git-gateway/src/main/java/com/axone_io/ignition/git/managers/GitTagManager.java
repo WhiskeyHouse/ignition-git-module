@@ -27,6 +27,7 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -572,24 +573,162 @@ public class GitTagManager {
     // ========================== EXPORT ==========================
 
     /**
+     * A unit of work that writes a complete tag tree into a staging directory.
+     *
+     * <p>Implementations must not touch the live {@code tags/} directory — that is
+     * {@link #exportStaged}'s job, and only once the staged tree has been validated.</p>
+     */
+    @FunctionalInterface
+    interface StagedTagWriter {
+        void write(Path staging) throws Exception;
+    }
+
+    /**
+     * Names the providers that exist in the repository but are absent from a staged export and
+     * have no legitimate reason to be, or returns {@code null} when nothing would be lost.
+     *
+     * <p>A provider may legitimately disappear: the built-in {@code System} provider is never
+     * exported, and an operator may narrow {@code includedProviders} in {@code .tag-config.json}.
+     * Both cases are decisions, and {@link TagExportConfig#isProviderIncluded(String)} already
+     * encodes them. Anything <em>else</em> vanishing means the gateway could not see a provider it
+     * was supposed to export — the startup race, where {@code getTagProviders()} is still
+     * populating — and publishing that view deletes real tags from the repository.</p>
+     */
+    static String describeProviderLoss(Path staging, Path destination, TagExportConfig config) {
+        if (!Files.isDirectory(destination)) {
+            return null; // first export: nothing to lose
+        }
+
+        Set<String> staged = listProviderDirectories(staging);
+        List<String> lost = new ArrayList<>();
+        for (String existing : listProviderDirectories(destination)) {
+            if (staged.contains(existing)) continue;
+            if (config != null && !config.isProviderIncluded(existing)) continue; // intentional
+            lost.add(existing);
+        }
+
+        if (lost.isEmpty()) {
+            return null;
+        }
+        Collections.sort(lost);
+        return "the export contains no tags for provider(s) " + String.join(", ", lost)
+                + ", which are present in the repository and are not excluded by .tag-config.json. "
+                + "This usually means the gateway had not finished registering its tag providers. "
+                + "The existing tags have been left untouched; retry once the gateway is fully started.";
+    }
+
+    /** Immediate subdirectories of {@code root}, ignoring dot-entries. Empty when absent. */
+    private static Set<String> listProviderDirectories(Path root) {
+        Set<String> names = new HashSet<>();
+        if (!Files.isDirectory(root)) {
+            return names;
+        }
+        try (DirectoryStream<Path> entries = Files.newDirectoryStream(root)) {
+            for (Path entry : entries) {
+                String name = entry.getFileName().toString();
+                if (Files.isDirectory(entry) && !isHiddenEntry(name)) {
+                    names.add(name);
+                }
+            }
+        } catch (IOException e) {
+            logger.warn("Could not list provider directories under " + root, e);
+        }
+        return names;
+    }
+
+    /**
+     * Builds a tag tree in a staging directory and publishes it over {@code tagFolderPath} only if
+     * it is both complete and error-free.
+     *
+     * <p>The previous implementation wiped {@code tags/} first and rebuilt in place, so an
+     * exception part-way through left the repository holding a truncated tree with no way back.
+     * Staging means a failed export is a no-op, and the completeness guard means a
+     * <em>successful</em> export of a partial provider set is refused rather than published — the
+     * two failures are equally destructive and neither is fixed by the other.</p>
+     */
+    static void exportStaged(Path tagFolderPath, TagExportConfig config, StagedTagWriter writer) throws Exception {
+        Path staging = siblingSuffixed(tagFolderPath, ".tmp");
+        Path previous = siblingSuffixed(tagFolderPath, ".bak");
+
+        try {
+            deleteRecursively(staging);
+            deleteRecursively(previous);
+            Files.createDirectories(staging);
+
+            writer.write(staging);
+
+            String loss = describeProviderLoss(staging, tagFolderPath, config);
+            if (loss != null) {
+                throw new IllegalStateException("Refusing to publish tag export: " + loss);
+            }
+
+            publishStagedTree(staging, tagFolderPath, previous);
+        } finally {
+            deleteRecursively(staging);
+            deleteRecursively(previous);
+        }
+    }
+
+    /**
+     * Swaps the staged tree into place by renaming rather than copying, so the window in which the
+     * repository has no {@code tags/} directory is a single rename wide. If the second rename
+     * fails the original tree is put back.
+     */
+    private static void publishStagedTree(Path staging, Path destination, Path previous) throws IOException {
+        boolean destinationExisted = Files.exists(destination);
+        if (destinationExisted) {
+            Files.move(destination, previous);
+        }
+        try {
+            Files.move(staging, destination);
+        } catch (IOException e) {
+            if (destinationExisted) {
+                logger.error("Could not publish staged tag export; restoring the previous tags directory", e);
+                Files.move(previous, destination);
+            }
+            throw e;
+        }
+    }
+
+    private static Path siblingSuffixed(Path path, String suffix) {
+        return path.resolveSibling(path.getFileName().toString() + suffix);
+    }
+
+    private static void deleteRecursively(Path path) {
+        try {
+            if (Files.exists(path)) {
+                FileUtils.deleteDirectory(path.toFile());
+            }
+        } catch (IOException e) {
+            logger.warn("Could not delete directory " + path, e);
+        }
+    }
+
+    /**
      * Exports all tag providers to the individual-file format under
      * {@code <projectFolder>/tags/<provider>/}.
      */
     public static void exportTag(Path projectFolderPath) {
         Path tagFolderPath = projectFolderPath.resolve("tags");
 
-        // Load config BEFORE clearing the directory so user settings are preserved
+        // Read config and group files from the live tree BEFORE anything is staged, so user
+        // settings and unfetchable group definitions survive into the new export.
         TagExportConfig config = loadTagExportConfig(tagFolderPath);
-
-        // Snapshot existing group files BEFORE clearing so a failed group fetch below can fall
-        // back to the prior content instead of leaving the tags directory with no group files.
         Map<String, String> preservedGroups = GitTagGroupManager.snapshotExistingGroupFiles(tagFolderPath);
 
-        clearDirectory(tagFolderPath);
-
         try {
-            Files.createDirectories(tagFolderPath);
+            exportStaged(tagFolderPath, config, staging -> writeAllProviders(staging, config, preservedGroups));
+        } catch (Exception e) {
+            logger.error("Error exporting tags: " + e.toString(), e);
+            throw new RuntimeException(e);
+        }
+    }
 
+    /** Writes every included provider, the config file, and the tag groups into {@code staging}. */
+    private static void writeAllProviders(Path staging,
+                                          TagExportConfig config,
+                                          Map<String, String> preservedGroups) throws Exception {
+        {
             for (TagProvider tagProvider : context.getTagManager().getTagProviders()) {
                 String providerName = tagProvider.getName();
 
@@ -617,7 +756,7 @@ public class GitTagManager {
                 JsonObject providerJson = sortedJson.getAsJsonObject();
 
                 // Create provider directory
-                Path providerDir = tagFolderPath.resolve(providerName);
+                Path providerDir = staging.resolve(providerName);
                 Files.createDirectories(providerDir);
 
                 // Walk the tag tree and write individual files
@@ -625,16 +764,12 @@ public class GitTagManager {
             }
 
             // Write the config file (preserves user settings for next import)
-            writeTagExportConfig(tagFolderPath, config);
+            writeTagExportConfig(staging, config);
 
             // Export tag groups (scan classes) for the same included providers as the tag files.
-            // Passing the pre-clear snapshot makes this non-destructive: providers whose groups can't
-            // be fetched keep their prior file.
-            GitTagGroupManager.exportTagGroups(tagFolderPath, preservedGroups, config);
-
-        } catch (Exception e) {
-            logger.error("Error exporting tags: " + e.toString(), e);
-            throw new RuntimeException(e);
+            // Passing the pre-staging snapshot makes this non-destructive: providers whose groups
+            // can't be fetched keep their prior file.
+            GitTagGroupManager.exportTagGroups(staging, preservedGroups, config);
         }
     }
 

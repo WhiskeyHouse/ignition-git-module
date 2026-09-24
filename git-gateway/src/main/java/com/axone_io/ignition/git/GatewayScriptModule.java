@@ -6,6 +6,7 @@ import com.axone_io.ignition.git.dto.ProductionModeConfig;
 import com.axone_io.ignition.git.managers.GitImageManager;
 import com.axone_io.ignition.git.managers.GitManager;
 import com.axone_io.ignition.git.managers.GitProjectManager;
+import com.axone_io.ignition.git.managers.GitPullPolicy;
 import com.axone_io.ignition.git.managers.GitTagManager;
 import com.axone_io.ignition.git.managers.GitThemeManager;
 import com.axone_io.ignition.git.managers.HotfixManager;
@@ -90,17 +91,26 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
             // Get the actual remote name (may not be "origin")
             String remoteName = getRemoteName(git);
 
-            PullCommand pull = git.pull();
+            // Fast-forward or fail: never inherit pull.rebase from repository config, and never
+            // let a deploy silently merge a diverged gateway branch.
+            PullCommand pull = GitPullPolicy.applyTo(git.pull());
             pull.setRemote(remoteName);
             setAuthentication(pull, projectName, userName);
 
             logger.info("Pulling from remote '" + remoteName + "' for project: " + projectName);
             PullResult result = pull.call();
-            if (!result.isSuccessful()) {
-                logger.warn("Cannot pull from git");
-            } else {
-                logger.info("Pull was successful.");
+
+            // A failed pull leaves the working tree on the old revision — or, if it got far enough
+            // to conflict, half-applied. Importing either into a running gateway is worse than not
+            // deploying at all, so stop here rather than continuing on a warning.
+            String failure = GitPullPolicy.describeFailure(result, git.getRepository());
+            if (failure != null) {
+                String errorMsg = "Pull failed for project '" + projectName + "': " + failure
+                        + " Nothing was imported into the gateway.";
+                logger.error(errorMsg);
+                throw new RuntimeException(errorMsg);
             }
+            logger.info("Pull was successful.");
 
             GitProjectManager.importProject(projectName);
 
@@ -269,11 +279,40 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
 
     @Override
     protected boolean exportConfigImpl(String projectName) {
+        // Images, themes and tags all come from the gateway, not from this project. Only the
+        // designated owner may write them, otherwise every git-backed project on the gateway keeps
+        // its own competing copy of the same shared state.
+        String skipReason = GatewayResourceExportPolicy.describeSkipReason(
+                projectName, getGatewayResourceOwners());
+        if (skipReason != null) {
+            logger.warn("Not exporting gateway-scoped resources for project '" + projectName
+                    + "': " + skipReason);
+            return true;
+        }
+
         Path projectFolderPath = getProjectFolderPath(projectName);
         exportImages(projectFolderPath);
         exportTheme(projectFolderPath);
         exportTag(projectFolderPath);
         return true;
+    }
+
+    /** Names of every configured project with {@code ExportGatewayResources} enabled. */
+    private List<String> getGatewayResourceOwners() {
+        List<String> owners = new ArrayList<>();
+        try {
+            SQuery<GitProjectsConfigRecord> query = new SQuery<>(GitProjectsConfigRecord.META);
+            for (GitProjectsConfigRecord record : context.getPersistenceInterface().query(query)) {
+                if (record.isExportGatewayResources()) {
+                    owners.add(record.getProjectName());
+                }
+            }
+        } catch (Exception e) {
+            // An unreadable config must not be mistaken for "nobody owns them, so go ahead" —
+            // describeSkipReason treats an empty list as unconfigured and refuses the export.
+            logger.error("Could not determine which project owns gateway-scoped resources", e);
+        }
+        return owners;
     }
 
     @Override

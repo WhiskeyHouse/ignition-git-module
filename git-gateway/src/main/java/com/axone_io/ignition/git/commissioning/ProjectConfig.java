@@ -58,5 +58,12 @@ public class ProjectConfig {
     @Getter
     @Setter
     private Boolean tags_importOnStartup;
+    /**
+     * Designates this project as the owner of gateway-scoped resources (tags, themes, images).
+     * Exactly one project per gateway should set it — see {@code GatewayResourceExportPolicy}.
+     */
+    @Getter
+    @Setter
+    private Boolean gateway_exportResources;
 
 }
