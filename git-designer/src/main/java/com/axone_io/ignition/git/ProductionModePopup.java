@@ -209,7 +209,12 @@ public class ProductionModePopup extends JDialog {
 
             if (result == JOptionPane.YES_OPTION) {
                 confirmed = true;
-                onProceed();
+                // Only record the decision and close. This used to invoke an onProceed() callback
+                // here, before dispose(), so the caller opened its next window while this
+                // APPLICATION_MODAL dialog still held focus: the new window's toFront() was
+                // discarded, and when the modal closed, focus fell back to the Designer frame,
+                // leaving the new window stranded behind it. Callers now read isConfirmed()
+                // after the constructor returns and open their next window themselves.
                 dispose();
             }
         });
@@ -234,11 +239,4 @@ public class ProductionModePopup extends JDialog {
         return confirmed;
     }
 
-    /**
-     * Called when the user confirms they want to proceed.
-     * Override to implement the actual operation.
-     */
-    public void onProceed() {
-        // override in anonymous subclass
-    }
 }

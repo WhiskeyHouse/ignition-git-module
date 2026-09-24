@@ -1,43 +1,35 @@
 package com.axone_io.ignition.git;
 
 import com.inductiveautomation.ignition.designer.gui.CommonUI;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import javax.imageio.ImageIO;
 import javax.swing.*;
 import java.awt.*;
-import java.awt.image.BufferedImage;
-import java.io.IOException;
-import java.io.InputStream;
 
 /**
  * Pull settings dialog. Allows the user to select which gateway resources to import
  * after pulling from Git.
  *
+ * <p>An <em>owned</em> {@link JDialog}, not a {@link JFrame}. As an unowned frame this opened
+ * behind the Designer window: an unowned top-level window has no z-order relationship to the
+ * Designer, and {@code toFront()} is only a request the window manager may ignore — which it
+ * reliably did when this was created just after a modal dialog closed, because the queued
+ * focus-restoration to the Designer frame ran afterwards and lifted it back over the top. A
+ * dialog owned by the Designer frame is kept above its owner by the window manager, so
+ * correctness no longer depends on winning that race. Modeless, so it does not block the
+ * Designer, matching the previous behaviour.</p>
+ *
  * <p>Note: Uses standard Swing layouts only (no IntelliJ forms library).</p>
  */
-public class PullPopup extends JFrame {
-    private final Logger logger = LoggerFactory.getLogger(getClass());
+public class PullPopup extends JDialog {
 
     private final JCheckBox imagesCheckBox;
     private final JCheckBox themesCheckBox;
     private final JCheckBox tagsCheckBox;
 
     public PullPopup(Component parent) {
-        try (InputStream iconStream = getClass().getResourceAsStream(
-                "/com/axone_io/ignition/git/icons/ic_commit.svg")) {
-            if (iconStream != null) {
-                BufferedImage img = ImageIO.read(iconStream);
-                if (img != null) {
-                    setIconImage(img);
-                }
-            }
-        } catch (IOException e) {
-            logger.trace(e.toString(), e);
-        }
+        super(parent instanceof Window ? (Window) parent : SwingUtilities.getWindowAncestor(parent),
+              "Pull Settings", ModalityType.MODELESS);
 
-        setTitle("Pull Settings");
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         setResizable(false);
 
