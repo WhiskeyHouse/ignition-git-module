@@ -19,7 +19,9 @@ import java.util.Set;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class GitProjectManagerTest {
 
@@ -231,6 +233,52 @@ public class GitProjectManagerTest {
             assertFalse(find(resources, "Main").isFolder());
         } finally {
             Files.setPosixFilePermissions(pack, PosixFilePermissions.fromString("rw-------"));
+        }
+    }
+
+    /**
+     * The allowlist comes from the gateway's registered modules. If the import runs before a
+     * module has registered, its folder looks like any other skipped dir, its resources are
+     * dropped, and the redundancy sync sends them to the backup as deletions. A skipped dir
+     * that holds a resource.json must stop the import instead.
+     */
+    @Test
+    public void skippedDirWithResourcesAbortsImport() throws Exception {
+        Path dir = tmp.newFolder("project").toPath();
+        writeView(dir.resolve("com.inductiveautomation.perspective/views/Main"));
+        Path script = dir.resolve("ignition/script-python/foo");
+        write(script.resolve("code.py"), "x = 1");
+        write(script.resolve("resource.json"), RESOURCE_JSON.replace("view.json", "code.py"));
+
+        Set<Resource> resources = null;
+        try {
+            resources = GitProjectManager.importFromFolder(dir, "TestProject", Set.of("ignition"));
+            fail("import must abort when a skipped dir holds resources, got " + resources);
+        } catch (IllegalStateException e) {
+            assertTrue("message names the folder: " + e.getMessage(),
+                    e.getMessage().contains("com.inductiveautomation.perspective"));
+        }
+        assertNull("nothing is imported", resources);
+    }
+
+    /**
+     * Dirs without any resource.json (.github, docs, tags, ...) are still skipped silently.
+     */
+    @Test
+    public void skippedDirsWithoutResourcesDoNotAbort() throws Exception {
+        Path dir = tmp.newFolder("project").toPath();
+        write(dir.resolve(".github/workflows/ci.yml"), "on: push");
+        write(dir.resolve("docs/guide/a.md"), "# docs");
+        write(dir.resolve("tags/tags.json"), "{}");
+        write(dir.resolve(".git/objects/xx/resource.json"), "{}");
+        writeView(dir.resolve("com.inductiveautomation.perspective/views/Main"));
+
+        Set<Resource> resources = GitProjectManager.importFromFolder(dir, "TestProject", MODULE_IDS);
+
+        assertFalse(find(resources, "Main").isFolder());
+        for (Resource r : resources) {
+            assertEquals("com.inductiveautomation.perspective",
+                    r.getResourcePath().getResourceType().moduleId());
         }
     }
 

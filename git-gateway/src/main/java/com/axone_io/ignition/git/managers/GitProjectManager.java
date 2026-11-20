@@ -102,10 +102,58 @@ public class GitProjectManager {
         return resources;
     }
 
+    /**
+     * Fails the import when a top-level dir that listFiles would skip holds a resource.json.
+     * The allowlist is the gateway's registered modules, so an import that runs before a module
+     * has registered would drop that module's resources, and the redundancy sync would send them
+     * to the backup as deletions. Aborting before anything is built leaves the project as it is.
+     * .git is never walked. Each dir's walk lists names only and stops at the first resource.json.
+     */
+    static void refuseSkippedResourceDirs(Path projectPath, Set<String> moduleIds) {
+        File[] topLevel = projectPath.toFile().listFiles();
+        if (topLevel == null) {
+            return;
+        }
+        List<String> offending = new ArrayList<>();
+        for (File dir : topLevel) {
+            if (dir.isDirectory() && !moduleIds.contains(dir.getName())
+                    && !".git".equals(dir.getName()) && containsResourceJson(dir)) {
+                offending.add(dir.getName());
+            }
+        }
+        if (!offending.isEmpty()) {
+            Collections.sort(offending);
+            throw new IllegalStateException("Folder(s) " + offending + " in " + projectPath
+                    + " contain Ignition resources but no installed module has that id; refusing to"
+                    + " import so those resources are not deleted. Check that the module is installed"
+                    + " and has started, then import again.");
+        }
+    }
+
+    private static boolean containsResourceJson(File dir) {
+        Stack<File> stack = new Stack<>();
+        stack.push(dir);
+        while (!stack.empty()) {
+            File[] entries = stack.pop().listFiles();
+            if (entries == null) {
+                continue;
+            }
+            for (File entry : entries) {
+                if (entry.isDirectory()) {
+                    stack.push(entry);
+                } else if ("resource.json".equals(entry.getName())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     public static Set<Resource> importFromFolder(Path projectPath, String projectName, Set<String> moduleIds) throws ResourceCollectionInvalidException, IOException {
         Set<Resource> resources = new HashSet<>();
         Set<StringPath> createdFolders = new HashSet<>();
 
+        refuseSkippedResourceDirs(projectPath, moduleIds);
         Set<Map.Entry<String, byte[]>> files = listFiles(projectPath, moduleIds);
 
         // Pre-seed with every directory that has its own resource.json so
