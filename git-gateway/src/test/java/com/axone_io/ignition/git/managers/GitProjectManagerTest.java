@@ -2,6 +2,7 @@ package com.axone_io.ignition.git.managers;
 
 import com.inductiveautomation.ignition.common.resourcecollection.Resource;
 import com.inductiveautomation.ignition.common.resourcecollection.ResourcePath;
+import org.junit.Assume;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -9,6 +10,7 @@ import org.junit.rules.TemporaryFolder;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -48,7 +50,7 @@ public class GitProjectManagerTest {
         writeView(views.resolve("EquipmentAction"));
         writeView(views.resolve("EquipmentAction/ActionButton"));
 
-        Set<Resource> resources = GitProjectManager.importFromFolder(root.toPath(), "TestProject");
+        Set<Resource> resources = GitProjectManager.importFromFolder(root.toPath(), "TestProject", MODULE_IDS);
 
         Map<ResourcePath, Integer> counts = new HashMap<>();
         for (Resource r : resources) {
@@ -79,7 +81,7 @@ public class GitProjectManagerTest {
         Files.write(bad.resolve("resource.json"), "{not-json".getBytes());
         writeView(bad.resolve("Child"));
 
-        Set<Resource> resources = GitProjectManager.importFromFolder(root.toPath(), "TestProject");
+        Set<Resource> resources = GitProjectManager.importFromFolder(root.toPath(), "TestProject", MODULE_IDS);
 
         Set<ResourcePath> seen = new HashSet<>();
         for (Resource r : resources) {
@@ -113,7 +115,8 @@ public class GitProjectManagerTest {
                 ("{\"scope\":\"G\",\"version\":1,\"restricted\":false,\"overridable\":true,"
                         + "\"files\":[\"doGet.py\"]}").getBytes());
 
-        Set<Resource> resources = GitProjectManager.importFromFolder(root.toPath(), "TestProject");
+        Set<Resource> resources = GitProjectManager.importFromFolder(root.toPath(), "TestProject",
+                Set.of("com.inductiveautomation.webdev"));
 
         Resource imported = find(resources, "tagConfig");
         assertFalse("resource with its own resource.json must not be a folder",
@@ -145,7 +148,7 @@ public class GitProjectManagerTest {
         Files.write(dir.resolve("tags/tags.json"), "{}".getBytes());
         writeView(dir.resolve("com.inductiveautomation.perspective/views/Main"));
 
-        Set<Resource> resources = GitProjectManager.importFromFolder(dir, "TestProject");
+        Set<Resource> resources = GitProjectManager.importFromFolder(dir, "TestProject", MODULE_IDS);
 
         for (Resource r : resources) {
             ResourcePath path = r.getResourcePath();
@@ -161,6 +164,74 @@ public class GitProjectManagerTest {
         long dataResources = resources.stream().filter(r -> !r.isFolder()).count();
         assertEquals("the view is the only data resource; the rest are its parent folders",
                 1, dataResources);
+    }
+
+    private static final Set<String> MODULE_IDS =
+            Set.of("com.inductiveautomation.perspective", "ignition");
+
+    private static void write(Path file, String content) throws Exception {
+        Files.createDirectories(file.getParent());
+        Files.write(file, content.getBytes());
+    }
+
+    /**
+     * A real project repo also holds .github/, deploy/, docs/, tests/ and other top-level dirs
+     * that are not resources. A deny-list of names imported them, and the redundancy sync later
+     * deleted them on the backup. Only top-level dirs named after a module id are resources.
+     */
+    @Test
+    public void onlyModuleDirsAreImported() throws Exception {
+        Path dir = tmp.newFolder("project").toPath();
+        write(dir.resolve("project.json"), "{\"title\":\"TestProject\"}");
+        write(dir.resolve("README.md"), "# readme");
+        write(dir.resolve(".gitignore"), "*.tmp");
+        write(dir.resolve(".git/HEAD"), "ref: refs/heads/main");
+        write(dir.resolve(".git/objects/xx/yy"), "pack");
+        write(dir.resolve(".github/workflows/ci.yml"), "on: push");
+        write(dir.resolve("deploy/x.yaml"), "a: 1");
+        write(dir.resolve("docs/a.md"), "# docs");
+        write(dir.resolve("tests/t.py"), "pass");
+        write(dir.resolve("tags/tags.json"), "{}");
+        writeView(dir.resolve("com.inductiveautomation.perspective/views/Main"));
+        Path script = dir.resolve("ignition/script-python/foo");
+        write(script.resolve("code.py"), "x = 1");
+        write(script.resolve("resource.json"), RESOURCE_JSON.replace("view.json", "code.py"));
+
+        Set<Resource> resources = GitProjectManager.importFromFolder(dir, "TestProject", MODULE_IDS);
+
+        Set<String> paths = new HashSet<>();
+        for (Resource r : resources) {
+            paths.add(r.getResourcePath() + (r.isFolder() ? " (folder)" : ""));
+        }
+        assertEquals(Set.of(
+                "com.inductiveautomation.perspective (folder)",
+                "com.inductiveautomation.perspective/views (folder)",
+                "com.inductiveautomation.perspective/views/Main",
+                "ignition (folder)",
+                "ignition/script-python (folder)",
+                "ignition/script-python/foo"), paths);
+    }
+
+    /**
+     * listFiles read every file's bytes before filtering, .git packs included, and a large repo
+     * ran the gateway out of heap. A skipped top-level dir must not be read at all: an
+     * unreadable file under .git/ must not fail the import.
+     */
+    @Test
+    public void skippedDirsAreNotRead() throws Exception {
+        Assume.assumeFalse(System.getProperty("os.name").toLowerCase().startsWith("windows"));
+        Path dir = tmp.newFolder("project").toPath();
+        writeView(dir.resolve("com.inductiveautomation.perspective/views/Main"));
+        Path pack = dir.resolve(".git/objects/pack/pack-1.pack");
+        write(pack, "pack");
+        Files.setPosixFilePermissions(pack, PosixFilePermissions.fromString("---------"));
+        Assume.assumeFalse("running as a user that can read mode 000 files", Files.isReadable(pack));
+        try {
+            Set<Resource> resources = GitProjectManager.importFromFolder(dir, "TestProject", MODULE_IDS);
+            assertFalse(find(resources, "Main").isFolder());
+        } finally {
+            Files.setPosixFilePermissions(pack, PosixFilePermissions.fromString("rw-------"));
+        }
     }
 
     private static Resource find(Set<Resource> resources, String pathSuffix) {

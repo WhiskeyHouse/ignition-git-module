@@ -33,7 +33,7 @@ public class GitProjectManager {
         Path projectDir = getProjectFolderPath(projectName);
 
         try {
-            Set<Resource> resources = importFromFolder(projectDir, projectName);
+            Set<Resource> resources = importFromFolder(projectDir, projectName, installedModuleIds());
             ResourceCollectionManifest projectManifest = loadProjectManifest(projectDir);
             projectManager.createOrReplace(projectName, projectManifest, new ArrayList(resources));
 
@@ -43,12 +43,40 @@ public class GitProjectManager {
         }
     }
 
-    public static Set<Map.Entry<String, byte[]>> listFiles(Path projectPath) {
+    /**
+     * Top-level dirs of an 8.3 project that can hold resources: a resource lives at
+     * {@code <moduleId>/<resourceTypeId>/...}, so the first segment must be a module id.
+     * Taken from the gateway's module manager because it is the gateway's own list of
+     * installed modules. Project resource types are registered in the Designer, not on the
+     * gateway, and the gateway ResourceTypeMetaRegistry covers config resources only, so
+     * neither is a usable list here. getModules() rather than getActiveModules(): a module
+     * that is installed but faulted still owns its resources, and dropping them would delete
+     * them. "ignition" is the platform id (script-python, named-query, ...), not a module.
+     */
+    static Set<String> installedModuleIds() {
+        Set<String> ids = new HashSet<>();
+        ids.add("ignition");
+        context.getModuleManager().getModules().forEach(m -> ids.add(m.getInfo().getId()));
+        return ids;
+    }
+
+    /**
+     * Reads every file under the allowed top-level dirs, keyed by its project-relative path
+     * with "/" separators. Root files and any other top-level dir (.git, .github, tags,
+     * deploy, docs, ...) are skipped before anything under them is listed or read.
+     */
+    public static Set<Map.Entry<String, byte[]>> listFiles(Path projectPath, Set<String> topLevelDirs) {
         Set<Map.Entry<String, byte[]>> resources = new HashSet<>();
         Stack<File> stack = new Stack<>();
-        File directory = projectPath.toFile();
 
-        stack.push(directory);
+        File[] topLevel = projectPath.toFile().listFiles();
+        if (topLevel != null) {
+            for (File file : topLevel) {
+                if (file.isDirectory() && topLevelDirs.contains(file.getName())) {
+                    stack.push(file);
+                }
+            }
+        }
 
         while (!stack.empty()) {
             File current = stack.pop();
@@ -74,26 +102,11 @@ public class GitProjectManager {
         return resources;
     }
 
-    private static final Set<String> NON_RESOURCE_TOP_LEVEL_DIRS = Set.of(".git", "tags", "images", "themes");
-
-    /**
-     * True when a project-relative file path lies inside a resource directory. Root-level
-     * files (project.json, README.md, .gitignore) and anything under .git/, tags/, images/
-     * or themes/ are not project resources. The first segment is matched exactly, so a
-     * module dir such as "tagsX" still counts.
-     */
-    public static boolean isAnIgnitionResource(String resource) {
-        int slash = resource.indexOf('/');
-        return slash > 0 && !NON_RESOURCE_TOP_LEVEL_DIRS.contains(resource.substring(0, slash));
-    }
-
-    public static Set<Resource> importFromFolder(Path projectPath, String projectName) throws ResourceCollectionInvalidException, IOException {
+    public static Set<Resource> importFromFolder(Path projectPath, String projectName, Set<String> moduleIds) throws ResourceCollectionInvalidException, IOException {
         Set<Resource> resources = new HashSet<>();
         Set<StringPath> createdFolders = new HashSet<>();
 
-        Set<Map.Entry<String, byte[]>> files = listFiles(projectPath).stream()
-                .filter(e -> isAnIgnitionResource(e.getKey()))
-                .collect(Collectors.toSet());
+        Set<Map.Entry<String, byte[]>> files = listFiles(projectPath, moduleIds);
 
         // Pre-seed with every directory that has its own resource.json so
         // createParentFolderResources never emits a folder resource for a path
