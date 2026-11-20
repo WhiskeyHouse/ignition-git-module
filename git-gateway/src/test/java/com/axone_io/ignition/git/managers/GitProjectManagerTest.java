@@ -8,6 +8,7 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -279,6 +280,43 @@ public class GitProjectManagerTest {
         for (Resource r : resources) {
             assertEquals("com.inductiveautomation.perspective",
                     r.getResourcePath().getResourceType().moduleId());
+        }
+    }
+
+    /**
+     * A cloned project can hold directory symlinks. Following them let a loop (or a link out of
+     * the repo) hang the walk or scan outside the project. Both the guard walk over skipped dirs
+     * and listFiles over module dirs must not follow symlinks. Two links per loop make a
+     * following walk branch until the OS refuses the path. A link from docs/ to a folder outside
+     * the project that holds a resource.json would make a following guard abort the import.
+     */
+    @Test(timeout = 20000)
+    public void symlinkLoopsDoNotHangImport() throws Exception {
+        Path dir = tmp.newFolder("project").toPath();
+        writeView(dir.resolve("com.inductiveautomation.perspective/views/Main"));
+        Path docsLoop = dir.resolve("docs/a");
+        Path moduleLoop = dir.resolve("com.inductiveautomation.perspective/views/loop");
+        Files.createDirectories(docsLoop);
+        Files.createDirectories(moduleLoop);
+        try {
+            for (Path loopDir : new Path[]{docsLoop, moduleLoop}) {
+                Files.createSymbolicLink(loopDir.resolve("l1"), loopDir);
+                Files.createSymbolicLink(loopDir.resolve("l2"), loopDir);
+            }
+            // A link out of the repo to a dir with a resource.json: followed, it would abort.
+            Path outside = tmp.newFolder("outside").toPath();
+            write(outside.resolve("x/resource.json"), "{}");
+            Files.createSymbolicLink(dir.resolve("docs/out"), outside);
+        } catch (UnsupportedOperationException | IOException e) {
+            Assume.assumeNoException("filesystem cannot create symlinks", e);
+        }
+
+        Set<Resource> resources = GitProjectManager.importFromFolder(dir, "TestProject", MODULE_IDS);
+
+        assertFalse(find(resources, "Main").isFolder());
+        for (Resource r : resources) {
+            assertFalse("symlinked dir was followed: " + r.getResourcePath(),
+                    String.valueOf(r.getResourcePath()).contains("/l1"));
         }
     }
 

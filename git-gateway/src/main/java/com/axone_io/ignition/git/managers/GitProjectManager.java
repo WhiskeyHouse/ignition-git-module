@@ -18,6 +18,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -63,7 +64,8 @@ public class GitProjectManager {
     /**
      * Reads every file under the allowed top-level dirs, keyed by its project-relative path
      * with "/" separators. Root files and any other top-level dir (.git, .github, tags,
-     * deploy, docs, ...) are skipped before anything under them is listed or read.
+     * deploy, docs, ...) are skipped before anything under them is listed or read. Symlinks are
+     * skipped, never followed, so a loop or a link out of the repo cannot hang or widen the walk.
      */
     public static Set<Map.Entry<String, byte[]>> listFiles(Path projectPath, Set<String> topLevelDirs) {
         Set<Map.Entry<String, byte[]>> resources = new HashSet<>();
@@ -72,7 +74,7 @@ public class GitProjectManager {
         File[] topLevel = projectPath.toFile().listFiles();
         if (topLevel != null) {
             for (File file : topLevel) {
-                if (file.isDirectory() && topLevelDirs.contains(file.getName())) {
+                if (Files.isDirectory(file.toPath(), LinkOption.NOFOLLOW_LINKS) && topLevelDirs.contains(file.getName())) {
                     stack.push(file);
                 }
             }
@@ -84,6 +86,9 @@ public class GitProjectManager {
             File[] files = current.listFiles();
             if (files != null) {
                 for (File file : files) {
+                    if (Files.isSymbolicLink(file.toPath())) {
+                        continue;
+                    }
                     if (file.isDirectory()) {
                         stack.push(file);
                     } else {
@@ -107,7 +112,8 @@ public class GitProjectManager {
      * The allowlist is the gateway's registered modules, so an import that runs before a module
      * has registered would drop that module's resources, and the redundancy sync would send them
      * to the backup as deletions. Aborting before anything is built leaves the project as it is.
-     * .git is never walked. Each dir's walk lists names only and stops at the first resource.json.
+     * .git is never walked and symlinks are not followed. Each dir's walk lists names only and
+     * stops at the first resource.json.
      */
     static void refuseSkippedResourceDirs(Path projectPath, Set<String> moduleIds) {
         File[] topLevel = projectPath.toFile().listFiles();
@@ -116,7 +122,7 @@ public class GitProjectManager {
         }
         List<String> offending = new ArrayList<>();
         for (File dir : topLevel) {
-            if (dir.isDirectory() && !moduleIds.contains(dir.getName())
+            if (Files.isDirectory(dir.toPath(), LinkOption.NOFOLLOW_LINKS) && !moduleIds.contains(dir.getName())
                     && !".git".equals(dir.getName()) && containsResourceJson(dir)) {
                 offending.add(dir.getName());
             }
@@ -139,6 +145,9 @@ public class GitProjectManager {
                 continue;
             }
             for (File entry : entries) {
+                if (Files.isSymbolicLink(entry.toPath())) {
+                    continue;
+                }
                 if (entry.isDirectory()) {
                     stack.push(entry);
                 } else if ("resource.json".equals(entry.getName())) {
