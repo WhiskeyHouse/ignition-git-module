@@ -123,6 +123,46 @@ public class GitProjectManagerTest {
                 imported.getAttributes().isEmpty());
     }
 
+    /**
+     * A cloned project dir holds files that are not resources: the root project.json,
+     * README.md and .gitignore, the whole .git/ tree, and top-level dirs such as tags/.
+     * importFromFolder grouped every file by its parent dir, so a root file became a folder
+     * resource named after itself and .git/** became resources too. The next project re-read
+     * dropped them, and redundancy sent a delete for each one, which removed the backup's
+     * real project.json.
+     */
+    @Test
+    public void nonResourceFilesAreNotImported() throws Exception {
+        File root = tmp.newFolder("project");
+        Path dir = root.toPath();
+        Files.write(dir.resolve("project.json"), "{\"title\":\"TestProject\"}".getBytes());
+        Files.write(dir.resolve("README.md"), "# readme".getBytes());
+        Files.write(dir.resolve(".gitignore"), "*.tmp".getBytes());
+        Files.createDirectories(dir.resolve(".git/objects/xx"));
+        Files.write(dir.resolve(".git/HEAD"), "ref: refs/heads/main".getBytes());
+        Files.write(dir.resolve(".git/objects/xx/yy"), new byte[]{1, 2, 3});
+        Files.createDirectories(dir.resolve("tags"));
+        Files.write(dir.resolve("tags/tags.json"), "{}".getBytes());
+        writeView(dir.resolve("com.inductiveautomation.perspective/views/Main"));
+
+        Set<Resource> resources = GitProjectManager.importFromFolder(dir, "TestProject");
+
+        for (Resource r : resources) {
+            ResourcePath path = r.getResourcePath();
+            String moduleId = path.getResourceType().moduleId();
+            for (String excluded : new String[]{"project.json", "README.md", ".gitignore", ".git", "tags"}) {
+                assertFalse("non-resource file imported as " + path,
+                        moduleId.equals(excluded) || String.valueOf(path).startsWith(excluded));
+            }
+            assertEquals("only the perspective resource tree is expected, got " + path,
+                    "com.inductiveautomation.perspective", moduleId);
+        }
+        assertFalse("the real view is imported as a data resource", find(resources, "Main").isFolder());
+        long dataResources = resources.stream().filter(r -> !r.isFolder()).count();
+        assertEquals("the view is the only data resource; the rest are its parent folders",
+                1, dataResources);
+    }
+
     private static Resource find(Set<Resource> resources, String pathSuffix) {
         for (Resource r : resources) {
             if (String.valueOf(r.getResourcePath()).endsWith(pathSuffix)) {

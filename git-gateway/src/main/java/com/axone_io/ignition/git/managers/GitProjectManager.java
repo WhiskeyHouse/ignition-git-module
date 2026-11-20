@@ -74,19 +74,26 @@ public class GitProjectManager {
         return resources;
     }
 
+    private static final Set<String> NON_RESOURCE_TOP_LEVEL_DIRS = Set.of(".git", "tags", "images", "themes");
+
+    /**
+     * True when a project-relative file path lies inside a resource directory. Root-level
+     * files (project.json, README.md, .gitignore) and anything under .git/, tags/, images/
+     * or themes/ are not project resources. The first segment is matched exactly, so a
+     * module dir such as "tagsX" still counts.
+     */
     public static boolean isAnIgnitionResource(String resource) {
-        return !resource.startsWith(".git")
-                && !resource.startsWith("tags")
-                && !resource.startsWith("images")
-                && !resource.startsWith("themes")
-                && !resource.equals("project.json");
+        int slash = resource.indexOf('/');
+        return slash > 0 && !NON_RESOURCE_TOP_LEVEL_DIRS.contains(resource.substring(0, slash));
     }
 
     public static Set<Resource> importFromFolder(Path projectPath, String projectName) throws ResourceCollectionInvalidException, IOException {
         Set<Resource> resources = new HashSet<>();
         Set<StringPath> createdFolders = new HashSet<>();
 
-        Set<Map.Entry<String, byte[]>> files = listFiles(projectPath);
+        Set<Map.Entry<String, byte[]>> files = listFiles(projectPath).stream()
+                .filter(e -> isAnIgnitionResource(e.getKey()))
+                .collect(Collectors.toSet());
 
         // Pre-seed with every directory that has its own resource.json so
         // createParentFolderResources never emits a folder resource for a path
