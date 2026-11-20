@@ -320,6 +320,34 @@ public class GitProjectManagerTest {
         }
     }
 
+    /**
+     * The guard must fail closed: a skipped dir it cannot list may hide a resource.json, so an
+     * unreadable subdir stops the import instead of being passed over.
+     */
+    @Test
+    public void unlistableSkippedDirAbortsImport() throws Exception {
+        Assume.assumeFalse(System.getProperty("os.name").toLowerCase().startsWith("windows"));
+        Path dir = tmp.newFolder("project").toPath();
+        writeView(dir.resolve("com.inductiveautomation.perspective/views/Main"));
+        Path locked = dir.resolve("docs/locked");
+        write(locked.resolve("resource.json"), "{}");
+        Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("---------"));
+        try {
+            Assume.assumeTrue("running as a user that can list mode 000 dirs",
+                    locked.toFile().listFiles() == null);
+            Set<Resource> resources = null;
+            try {
+                resources = GitProjectManager.importFromFolder(dir, "TestProject", MODULE_IDS);
+                fail("import must abort when a skipped dir cannot be listed, got " + resources);
+            } catch (IllegalStateException e) {
+                assertTrue("message names the dir: " + e.getMessage(),
+                        e.getMessage().contains("locked"));
+            }
+        } finally {
+            Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rwx------"));
+        }
+    }
+
     private static Resource find(Set<Resource> resources, String pathSuffix) {
         for (Resource r : resources) {
             if (String.valueOf(r.getResourcePath()).endsWith(pathSuffix)) {

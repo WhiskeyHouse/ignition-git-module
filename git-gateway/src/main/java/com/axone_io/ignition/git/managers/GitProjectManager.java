@@ -113,7 +113,7 @@ public class GitProjectManager {
      * has registered would drop that module's resources, and the redundancy sync would send them
      * to the backup as deletions. Aborting before anything is built leaves the project as it is.
      * .git is never walked and symlinks are not followed. Each dir's walk lists names only and
-     * stops at the first resource.json.
+     * stops at the first resource.json. A dir that cannot be listed also aborts the import.
      */
     static void refuseSkippedResourceDirs(Path projectPath, Set<String> moduleIds) {
         File[] topLevel = projectPath.toFile().listFiles();
@@ -140,9 +140,12 @@ public class GitProjectManager {
         Stack<File> stack = new Stack<>();
         stack.push(dir);
         while (!stack.empty()) {
-            File[] entries = stack.pop().listFiles();
+            File current = stack.pop();
+            File[] entries = current.listFiles();
             if (entries == null) {
-                continue;
+                // Unreadable or an I/O error: a resource.json under it would go unseen, so fail closed.
+                throw new IllegalStateException("Cannot list " + current
+                        + "; refusing to import without checking it for Ignition resources.");
             }
             for (File entry : entries) {
                 if (Files.isSymbolicLink(entry.toPath())) {
