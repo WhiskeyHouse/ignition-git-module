@@ -18,6 +18,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -33,7 +34,7 @@ public class GitProjectManager {
         Path projectDir = getProjectFolderPath(projectName);
 
         try {
-            Set<Resource> resources = importFromFolder(projectDir, projectName);
+            Set<Resource> resources = importFromFolder(projectDir, projectName, installedModuleIds());
             ResourceCollectionManifest projectManifest = loadProjectManifest(projectDir);
             projectManager.createOrReplace(projectName, projectManifest, new ArrayList(resources));
 
@@ -43,12 +44,41 @@ public class GitProjectManager {
         }
     }
 
-    public static Set<Map.Entry<String, byte[]>> listFiles(Path projectPath) {
+    /**
+     * Top-level dirs of an 8.3 project that can hold resources: a resource lives at
+     * {@code <moduleId>/<resourceTypeId>/...}, so the first segment must be a module id.
+     * Taken from the gateway's module manager because it is the gateway's own list of
+     * installed modules. Project resource types are registered in the Designer, not on the
+     * gateway, and the gateway ResourceTypeMetaRegistry covers config resources only, so
+     * neither is a usable list here. getModules() rather than getActiveModules(): a module
+     * that is installed but faulted still owns its resources, and dropping them would delete
+     * them. "ignition" is the platform id (script-python, named-query, ...), not a module.
+     */
+    static Set<String> installedModuleIds() {
+        Set<String> ids = new HashSet<>();
+        ids.add("ignition");
+        context.getModuleManager().getModules().forEach(m -> ids.add(m.getInfo().getId()));
+        return ids;
+    }
+
+    /**
+     * Reads every file under the allowed top-level dirs, keyed by its project-relative path
+     * with "/" separators. Root files and any other top-level dir (.git, .github, tags,
+     * deploy, docs, ...) are skipped before anything under them is listed or read. Symlinks are
+     * skipped, never followed, so a loop or a link out of the repo cannot hang or widen the walk.
+     */
+    public static Set<Map.Entry<String, byte[]>> listFiles(Path projectPath, Set<String> topLevelDirs) {
         Set<Map.Entry<String, byte[]>> resources = new HashSet<>();
         Stack<File> stack = new Stack<>();
-        File directory = projectPath.toFile();
 
-        stack.push(directory);
+        File[] topLevel = projectPath.toFile().listFiles();
+        if (topLevel != null) {
+            for (File file : topLevel) {
+                if (Files.isDirectory(file.toPath(), LinkOption.NOFOLLOW_LINKS) && topLevelDirs.contains(file.getName())) {
+                    stack.push(file);
+                }
+            }
+        }
 
         while (!stack.empty()) {
             File current = stack.pop();
@@ -56,6 +86,9 @@ public class GitProjectManager {
             File[] files = current.listFiles();
             if (files != null) {
                 for (File file : files) {
+                    if (Files.isSymbolicLink(file.toPath())) {
+                        continue;
+                    }
                     if (file.isDirectory()) {
                         stack.push(file);
                     } else {
@@ -74,19 +107,66 @@ public class GitProjectManager {
         return resources;
     }
 
-    public static boolean isAnIgnitionResource(String resource) {
-        return !resource.startsWith(".git")
-                && !resource.startsWith("tags")
-                && !resource.startsWith("images")
-                && !resource.startsWith("themes")
-                && !resource.equals("project.json");
+    /**
+     * Fails the import when a top-level dir that listFiles would skip holds a resource.json.
+     * The allowlist is the gateway's registered modules, so an import that runs before a module
+     * has registered would drop that module's resources, and the redundancy sync would send them
+     * to the backup as deletions. Aborting before anything is built leaves the project as it is.
+     * .git is never walked and symlinks are not followed. Each dir's walk lists names only and
+     * stops at the first resource.json. A dir that cannot be listed also aborts the import.
+     */
+    static void refuseSkippedResourceDirs(Path projectPath, Set<String> moduleIds) {
+        File[] topLevel = projectPath.toFile().listFiles();
+        if (topLevel == null) {
+            return;
+        }
+        List<String> offending = new ArrayList<>();
+        for (File dir : topLevel) {
+            if (Files.isDirectory(dir.toPath(), LinkOption.NOFOLLOW_LINKS) && !moduleIds.contains(dir.getName())
+                    && !".git".equals(dir.getName()) && containsResourceJson(dir)) {
+                offending.add(dir.getName());
+            }
+        }
+        if (!offending.isEmpty()) {
+            Collections.sort(offending);
+            throw new IllegalStateException("Folder(s) " + offending + " in " + projectPath
+                    + " contain Ignition resources but no installed module has that id; refusing to"
+                    + " import so those resources are not deleted. Check that the module is installed"
+                    + " and has started, then import again.");
+        }
     }
 
-    public static Set<Resource> importFromFolder(Path projectPath, String projectName) throws ResourceCollectionInvalidException, IOException {
+    private static boolean containsResourceJson(File dir) {
+        Stack<File> stack = new Stack<>();
+        stack.push(dir);
+        while (!stack.empty()) {
+            File current = stack.pop();
+            File[] entries = current.listFiles();
+            if (entries == null) {
+                // Unreadable or an I/O error: a resource.json under it would go unseen, so fail closed.
+                throw new IllegalStateException("Cannot list " + current
+                        + "; refusing to import without checking it for Ignition resources.");
+            }
+            for (File entry : entries) {
+                if (Files.isSymbolicLink(entry.toPath())) {
+                    continue;
+                }
+                if (entry.isDirectory()) {
+                    stack.push(entry);
+                } else if ("resource.json".equals(entry.getName())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    public static Set<Resource> importFromFolder(Path projectPath, String projectName, Set<String> moduleIds) throws ResourceCollectionInvalidException, IOException {
         Set<Resource> resources = new HashSet<>();
         Set<StringPath> createdFolders = new HashSet<>();
 
-        Set<Map.Entry<String, byte[]>> files = listFiles(projectPath);
+        refuseSkippedResourceDirs(projectPath, moduleIds);
+        Set<Map.Entry<String, byte[]>> files = listFiles(projectPath, moduleIds);
 
         // Pre-seed with every directory that has its own resource.json so
         // createParentFolderResources never emits a folder resource for a path
