@@ -26,6 +26,7 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -141,38 +142,55 @@ public class GitProjectManager {
      * files as they were on disk before the write, so local edits that are not committed are
      * kept as edited. The temp dir is removed afterwards; if anything could not be put back, it
      * is left in place and named in the log so the files can be recovered by hand. A saved file
-     * whose path is now a dir or a symlink counts as not put back. Saved dir modes are applied
-     * last, deepest first, so a restrictive mode cannot block copying the dir's children.
-     * Returns true when everything was put back.
+     * whose path is now a dir or a symlink counts as not put back. Restored dirs are created
+     * owner-only, and the saved dir modes are applied last, deepest first, also when the restore
+     * fails, so a restrictive mode cannot block copying the dir's children and a dir is never
+     * left more open than it was. Returns true when everything was put back.
      */
     static boolean restoreNonModuleEntries(SavedEntries kept, Path projectDir) {
         if (kept == null) {
             return true;
         }
+        boolean restored = false;
         try {
             List<String> conflicts = copyTree(kept.dir, projectDir, true);
-            if (!conflicts.isEmpty()) {
+            if (conflicts.isEmpty()) {
+                restored = true;
+            } else {
                 logger.error("Could not restore non-resource files in " + projectDir
                         + " after the project write, because these paths are now a dir or a symlink: "
                         + conflicts + "; the files are saved in " + kept.dir);
-                return false;
             }
-            List<Path> dirs = new ArrayList<>(kept.dirModes.keySet());
-            dirs.sort(Comparator.comparingInt(Path::getNameCount).reversed());
-            for (Path dir : dirs) {
-                PosixFileAttributeView view = Files.getFileAttributeView(projectDir.resolve(dir),
-                        PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
-                if (view != null) {
-                    view.setPermissions(kept.dirModes.get(dir));
-                }
-            }
-            deleteQuietly(kept.dir);
-            return true;
         } catch (IOException | RuntimeException e) {
             logger.error("Could not restore non-resource files in " + projectDir
                     + " after the project write; the files are saved in " + kept.dir, e);
-            return false;
+        } finally {
+            restored &= applyDirModes(kept, projectDir);
         }
+        if (restored) {
+            deleteQuietly(kept.dir);
+        }
+        return restored;
+    }
+
+    private static boolean applyDirModes(SavedEntries kept, Path projectDir) {
+        List<Path> dirs = new ArrayList<>(kept.dirModes.keySet());
+        dirs.sort(Comparator.comparingInt(Path::getNameCount).reversed());
+        boolean applied = true;
+        for (Path dir : dirs) {
+            try {
+                PosixFileAttributeView view = Files.getFileAttributeView(projectDir.resolve(dir),
+                        PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+                if (view != null && Files.isDirectory(projectDir.resolve(dir), LinkOption.NOFOLLOW_LINKS)) {
+                    view.setPermissions(kept.dirModes.get(dir));
+                }
+            } catch (IOException | RuntimeException e) {
+                applied = false;
+                logger.error("Could not restore the mode of " + projectDir.resolve(dir)
+                        + "; the files are saved in " + kept.dir, e);
+            }
+        }
+        return applied;
     }
 
     /**
@@ -187,7 +205,13 @@ public class GitProjectManager {
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
                 Path dest = target.resolve(source.relativize(dir).toString());
                 if (!Files.isDirectory(dest, LinkOption.NOFOLLOW_LINKS)) {
-                    Files.createDirectories(dest);
+                    // Owner-only until the saved mode is applied, so files are never exposed.
+                    if (dest.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+                        Files.createDirectories(dest, PosixFilePermissions.asFileAttribute(
+                                PosixFilePermissions.fromString("rwx------")));
+                    } else {
+                        Files.createDirectories(dest);
+                    }
                 }
                 return FileVisitResult.CONTINUE;
             }

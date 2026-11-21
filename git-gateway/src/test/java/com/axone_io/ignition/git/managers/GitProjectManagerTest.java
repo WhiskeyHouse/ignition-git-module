@@ -584,6 +584,30 @@ public class GitProjectManagerTest {
         assertArrayEquals("a: 1".getBytes(), Files.readAllBytes(secret.resolve("config.yaml")));
     }
 
+    /**
+     * A restore conflict must not leave a saved 0700 dir more open than it was.
+     */
+    @Test
+    public void skippedDirModesAreKeptOnRestoreConflict() throws Exception {
+        Path dir = tmp.newFolder("project").toPath();
+        writeRepoFiles(dir);
+        Assume.assumeNotNull(Files.getFileAttributeView(dir, java.nio.file.attribute.PosixFileAttributeView.class));
+        Path secret = dir.resolve("deploy/private");
+        write(secret.resolve("config.yaml"), "a: 1");
+        Files.setPosixFilePermissions(secret, PosixFilePermissions.fromString("rwx------"));
+        ProjectManager pm = deletingProjectManager(dir, MODULE_IDS, new ArrayList<>(), false,
+                () -> Files.createDirectories(dir.resolve("deploy/project.yaml")));
+
+        GitProjectManager.SavedEntries kept = GitProjectManager.copyNonModuleEntries(dir, MODULE_IDS);
+        try {
+            pm.createOrReplace("TestProject", null, new ArrayList<>());
+            assertFalse(GitProjectManager.restoreNonModuleEntries(kept, dir));
+            assertEquals("rwx------", PosixFilePermissions.toString(Files.getPosixFilePermissions(secret)));
+        } finally {
+            deleteTree(kept.dir);
+        }
+    }
+
     private static Resource find(Set<Resource> resources, String pathSuffix) {
         for (Resource r : resources) {
             if (String.valueOf(r.getResourcePath()).endsWith(pathSuffix)) {
