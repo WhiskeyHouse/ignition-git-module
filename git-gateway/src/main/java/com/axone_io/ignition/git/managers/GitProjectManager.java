@@ -17,11 +17,16 @@ import org.apache.commons.lang3.StringUtils;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static com.axone_io.ignition.git.GatewayHook.context;
 import static com.axone_io.ignition.git.managers.GitManager.getProjectFolderPath;
@@ -30,17 +35,142 @@ public class GitProjectManager {
     private final static LoggerEx logger = LoggerEx.newBuilder().build(GitProjectManager.class);
 
     public static void importProject(String projectName) {
-        ProjectManager projectManager = context.getProjectManager();
-        Path projectDir = getProjectFolderPath(projectName);
+        importProject(context.getProjectManager(), getProjectFolderPath(projectName), projectName,
+                installedModuleIds());
+    }
 
+    static void importProject(ProjectManager projectManager, Path projectDir, String projectName,
+                              Set<String> moduleIds) {
         try {
-            Set<Resource> resources = importFromFolder(projectDir, projectName, installedModuleIds());
+            Set<Resource> resources = importFromFolder(projectDir, projectName, moduleIds);
             ResourceCollectionManifest projectManifest = loadProjectManifest(projectDir);
-            projectManager.createOrReplace(projectName, projectManifest, new ArrayList(resources));
+            // The project write removes the top-level entries it was not given resources for,
+            // and only module dirs are imported, so copy the rest aside and put them back after.
+            Path kept = copyNonModuleEntries(projectDir, moduleIds);
+            try {
+                projectManager.createOrReplace(projectName, projectManifest, new ArrayList(resources));
+            } finally {
+                restoreNonModuleEntries(kept, projectDir);
+            }
 
         } catch (Exception e) {
             logger.error("An error occurred while importing '" + projectName + "' project.", e);
             throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Copies every top-level entry of the project dir that is not imported as a resource (root
+     * files other than project.json, and dirs that are not module ids, such as deploy/, images/
+     * and tags/) to a temp dir, and returns it, or null when there is nothing to keep. .git is
+     * left in place: the project write does not touch it, and copying it would read the whole
+     * history. Symlinks are copied as links, never followed. A copy failure aborts the import
+     * before the project write, so nothing is deleted that could not be put back.
+     */
+    static Path copyNonModuleEntries(Path projectDir, Set<String> moduleIds) throws IOException {
+        List<Path> entries = new ArrayList<>();
+        try (Stream<Path> top = Files.list(projectDir)) {
+            top.filter(p -> isKeptEntry(p, moduleIds)).forEach(entries::add);
+        }
+        if (entries.isEmpty()) {
+            return null;
+        }
+        Path kept = Files.createTempDirectory("ignition-git-keep-");
+        try {
+            for (Path entry : entries) {
+                copyTree(entry, kept.resolve(entry.getFileName().toString()), false);
+            }
+        } catch (IOException | RuntimeException e) {
+            deleteQuietly(kept);
+            throw e;
+        }
+        return kept;
+    }
+
+    private static boolean isKeptEntry(Path entry, Set<String> moduleIds) {
+        String name = entry.getFileName().toString();
+        if (".git".equals(name)) {
+            return false;
+        }
+        if (Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)) {
+            return !moduleIds.contains(name);
+        }
+        // project.json is written by the project write from the manifest.
+        return !"project.json".equals(name);
+    }
+
+    /**
+     * Puts the entries saved by copyNonModuleEntries back: a file is written back when it is
+     * missing or its bytes differ, and a symlink when it is missing. The saved copies are the
+     * files as they were on disk before the write, so local edits that are not committed are
+     * kept as edited. The temp dir is removed afterwards; if anything could not be put back, it
+     * is left in place and named in the log so the files can be recovered by hand.
+     */
+    static void restoreNonModuleEntries(Path kept, Path projectDir) {
+        if (kept == null) {
+            return;
+        }
+        try {
+            copyTree(kept, projectDir, true);
+            deleteQuietly(kept);
+        } catch (IOException | RuntimeException e) {
+            logger.error("Could not restore non-resource files in " + projectDir
+                    + " after the project write; the files are saved in " + kept, e);
+        }
+    }
+
+    /**
+     * Copies a tree without following symlinks. With onlyIfChanged, a regular file is written
+     * only when the target is missing or differs, and a symlink only when the target is missing.
+     */
+    private static void copyTree(Path source, Path target, boolean onlyIfChanged) throws IOException {
+        Files.walkFileTree(source, new SimpleFileVisitor<Path>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                Path dest = target.resolve(source.relativize(dir).toString());
+                if (!Files.isDirectory(dest, LinkOption.NOFOLLOW_LINKS)) {
+                    Files.createDirectories(dest);
+                }
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Path dest = target.resolve(source.relativize(file).toString());
+                boolean exists = Files.exists(dest, LinkOption.NOFOLLOW_LINKS);
+                if (attrs.isSymbolicLink()) {
+                    if (!exists) {
+                        Files.copy(file, dest, LinkOption.NOFOLLOW_LINKS);
+                    }
+                } else if (!onlyIfChanged || !exists) {
+                    Files.copy(file, dest, StandardCopyOption.COPY_ATTRIBUTES);
+                } else if (Files.isRegularFile(dest, LinkOption.NOFOLLOW_LINKS)
+                        && Files.mismatch(file, dest) != -1) {
+                    Files.copy(file, dest, StandardCopyOption.REPLACE_EXISTING,
+                            StandardCopyOption.COPY_ATTRIBUTES);
+                }
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
+    private static void deleteQuietly(Path root) {
+        try {
+            Files.walkFileTree(root, new SimpleFileVisitor<Path>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    Files.delete(file);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                    Files.delete(dir);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (IOException e) {
+            logger.warn("Could not remove temp dir " + root, e);
         }
     }
 
