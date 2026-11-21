@@ -3,7 +3,7 @@ report_id: c9b5334ac59ef9dce26e621462ea607c
 version: 0.1
 repo_type: Public
 timestamp: '2024-03-14T00:51:43+00:00'
-requested_by: pmannion2
+requested_by: example-user
 provider: github
 branch: main
 detected_tools_count: 11
@@ -113,7 +113,7 @@ tools:
   image_url: https://img.stackshare.io/package/maven/image.png
   detection_source_url: https://github.com/WhiskeyHouse/ignition-git-module/blob/main/git-gateway/pom.xml
   detection_source: git-gateway/pom.xml
-  last_updated_by: pmannion2
+  last_updated_by: example-user
   last_updated_on: 2024-02-01 12:43:44.000000000 Z
   vulnerabilities:
   - name: TemporaryFolder on unix-like systems does not limit access to created files
@@ -146,7 +146,7 @@ tools:
   image_url: https://img.stackshare.io/package/maven/image.png
   detection_source_url: https://github.com/WhiskeyHouse/ignition-git-module/blob/main/git-gateway/pom.xml
   detection_source: git-gateway/pom.xml
-  last_updated_by: pmannion2
+  last_updated_by: example-user
   last_updated_on: 2024-02-01 03:16:05.000000000 Z
   vulnerabilities:
   - name: SnakeYaml Constructor Deserialization Remote Code Execution

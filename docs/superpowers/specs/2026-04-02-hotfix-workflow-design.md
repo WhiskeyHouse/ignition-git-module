@@ -128,8 +128,8 @@ A new class that handles GitHub REST API calls using Java's built-in `HttpClient
 ### Repo URL Parsing
 
 Extracts owner/repo from the existing `repo_uri` config:
-- `https://github.com/WHK01/repo.git` -> `WHK01/repo`
-- `git@github.com:WHK01/repo.git` -> `WHK01/repo`
+- `https://github.com/example-org/repo.git` -> `example-org/repo`
+- `git@github.com:example-org/repo.git` -> `example-org/repo`
 
 ### Authentication
 
@@ -179,7 +179,7 @@ Every hotfix operation is logged at INFO/WARN level with the `[Production Hotfix
 [Production Hotfix] Branch created: hotfix/fix-pump-alarm
 [Production Hotfix] Committed: abc1234 "Fix pump alarm threshold..."
 [Production Hotfix] Pushed to remote
-[Production Hotfix] PR #42 created: https://github.com/WHK01/repo/pull/42
+[Production Hotfix] PR #42 created: https://github.com/example-org/repo/pull/42
 [Production Hotfix] Local merge to main completed
 [Production Hotfix] COMPLETED SUCCESSFULLY
 ```
