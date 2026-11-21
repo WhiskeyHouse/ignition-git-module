@@ -5,9 +5,9 @@
   ignition_userName: admin
   ignition_inheritable: false
   ignition_parentName: Global
-  user_name: pmannion2
-  user_email: pmannion@whiskeyhouse.com
-  user_password: abc123
+  user_name: example-user
+  user_email: user@example.com
+  user_password: change-me
   commissioning_importThemes: true
   commissioning_importTags: true
   commissioning_importImages: true
@@ -19,9 +19,9 @@
   ignition_userName: admin
   ignition_inheritable: false
   ignition_parentName: Global
-  user_name: pmannion2
-  user_email: pmannion@whiskeyhouse.com
-  user_password: abc123
+  user_name: example-user
+  user_email: user@example.com
+  user_password: change-me
   commissioning_importThemes: true
   commissioning_importTags: true
   commissioning_importImages: true
