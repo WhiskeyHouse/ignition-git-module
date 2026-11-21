@@ -503,7 +503,7 @@ public class GatewayScriptModule extends AbstractScriptModule implements GitScri
                 String remoteBranchName = fullName.substring(Constants.R_REMOTES.length());
                 String branchName;
 
-                // Also strip the remote name prefix (e.g., "origin/" or "whk-distillery01-ignition-global/")
+                // Also strip the remote name prefix (e.g., "origin/" or "example-ignition-global/")
                 if (remoteBranchName.startsWith(remoteName + "/")) {
                     branchName = remoteBranchName.substring(remoteName.length() + 1);
                 } else {

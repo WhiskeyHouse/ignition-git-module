@@ -26,7 +26,7 @@ public class GitTagGroupManagerTest {
     @Rule
     public TemporaryFolder tempFolder = new TemporaryFolder();
 
-    private static final String WHK01_JSON =
+    private static final String PLANT01_JSON =
             "{\n  \"tagGroups\": [\n    { \"name\": \"Fast\", \"rate\": 250 },\n" +
             "    { \"name\": \"Modbus\", \"rate\": 1000 }\n  ]\n}";
     private static final String DEFAULT_JSON =
@@ -35,7 +35,7 @@ public class GitTagGroupManagerTest {
     @Test
     public void snapshotExistingGroupFiles_readsGroupFilePerProvider() throws Exception {
         Path tagsDir = tempFolder.newFolder("tags").toPath();
-        writeGroupFile(tagsDir, "WHK01", WHK01_JSON);
+        writeGroupFile(tagsDir, "Plant01", PLANT01_JSON);
         writeGroupFile(tagsDir, "default", DEFAULT_JSON);
         // A provider directory with tags but no group file must not appear in the snapshot.
         Files.createDirectories(tagsDir.resolve("Spark"));
@@ -43,7 +43,7 @@ public class GitTagGroupManagerTest {
         Map<String, String> snapshot = GitTagGroupManager.snapshotExistingGroupFiles(tagsDir);
 
         assertEquals(2, snapshot.size());
-        assertEquals(WHK01_JSON, snapshot.get("WHK01"));
+        assertEquals(PLANT01_JSON, snapshot.get("Plant01"));
         assertEquals(DEFAULT_JSON, snapshot.get("default"));
         assertFalse("provider without a group file must be absent", snapshot.containsKey("Spark"));
     }
@@ -51,32 +51,32 @@ public class GitTagGroupManagerTest {
     @Test
     public void writeGroupFiles_preservesExistingWhenFreshFetchFailed() throws Exception {
         // Simulates the post-clearDirectory state: the tags dir is empty and the fresh
-        // fetch for WHK01 came back null (timeout/exception/empty on the source gateway).
+        // fetch for Plant01 came back null (timeout/exception/empty on the source gateway).
         Path tagsDir = tempFolder.newFolder("tags").toPath();
         Map<String, String> preserved = new HashMap<>();
-        preserved.put("WHK01", WHK01_JSON);
+        preserved.put("Plant01", PLANT01_JSON);
         Map<String, String> fresh = new HashMap<>();
-        fresh.put("WHK01", null); // fetch failed
+        fresh.put("Plant01", null); // fetch failed
 
         GitTagGroupManager.writeGroupFiles(tagsDir, fresh, preserved);
 
-        Path file = tagsDir.resolve("WHK01").resolve(GitTagGroupManager.TAG_GROUPS_FILENAME);
+        Path file = tagsDir.resolve("Plant01").resolve(GitTagGroupManager.TAG_GROUPS_FILENAME);
         assertTrue("failed fetch must not delete the prior group file", Files.exists(file));
-        assertEquals(WHK01_JSON, Files.readString(file));
+        assertEquals(PLANT01_JSON, Files.readString(file));
     }
 
     @Test
     public void writeGroupFiles_writesFreshContentWhenFetchSucceeded() throws Exception {
         Path tagsDir = tempFolder.newFolder("tags").toPath();
         Map<String, String> preserved = new HashMap<>();
-        preserved.put("WHK01", DEFAULT_JSON); // stale prior content
+        preserved.put("Plant01", DEFAULT_JSON); // stale prior content
         Map<String, String> fresh = new HashMap<>();
-        fresh.put("WHK01", WHK01_JSON); // successful fetch
+        fresh.put("Plant01", PLANT01_JSON); // successful fetch
 
         GitTagGroupManager.writeGroupFiles(tagsDir, fresh, preserved);
 
-        Path file = tagsDir.resolve("WHK01").resolve(GitTagGroupManager.TAG_GROUPS_FILENAME);
-        assertEquals("fresh content must overwrite preserved", WHK01_JSON, Files.readString(file));
+        Path file = tagsDir.resolve("Plant01").resolve(GitTagGroupManager.TAG_GROUPS_FILENAME);
+        assertEquals("fresh content must overwrite preserved", PLANT01_JSON, Files.readString(file));
     }
 
     @Test
@@ -93,18 +93,18 @@ public class GitTagGroupManagerTest {
 
     @Test
     public void filterIncludedProviders_dropsExcludedAndSystemProviders() {
-        // includedProviders = [WHK01] -> only WHK01 kept; default excluded by config, System always excluded.
+        // includedProviders = [Plant01] -> only Plant01 kept; default excluded by config, System always excluded.
         com.axone_io.ignition.git.TagExportConfig config = new com.axone_io.ignition.git.TagExportConfig(
-                java.util.List.of("WHK01"), new java.util.ArrayList<>(), "o");
+                java.util.List.of("Plant01"), new java.util.ArrayList<>(), "o");
         Map<String, String> in = new HashMap<>();
-        in.put("WHK01", WHK01_JSON);
+        in.put("Plant01", PLANT01_JSON);
         in.put("default", DEFAULT_JSON);
         in.put("System", DEFAULT_JSON);
 
         Map<String, String> out = GitTagGroupManager.filterIncludedProviders(in, config);
 
         assertEquals(1, out.size());
-        assertEquals(WHK01_JSON, out.get("WHK01"));
+        assertEquals(PLANT01_JSON, out.get("Plant01"));
         assertFalse(out.containsKey("default"));
         assertFalse(out.containsKey("System"));
     }
@@ -114,14 +114,14 @@ public class GitTagGroupManagerTest {
         // Empty includedProviders means "all providers", but System is always excluded.
         com.axone_io.ignition.git.TagExportConfig config = new com.axone_io.ignition.git.TagExportConfig();
         Map<String, String> in = new HashMap<>();
-        in.put("WHK01", WHK01_JSON);
+        in.put("Plant01", PLANT01_JSON);
         in.put("default", DEFAULT_JSON);
         in.put("System", DEFAULT_JSON);
 
         Map<String, String> out = GitTagGroupManager.filterIncludedProviders(in, config);
 
         assertEquals(2, out.size());
-        assertTrue(out.containsKey("WHK01"));
+        assertTrue(out.containsKey("Plant01"));
         assertTrue(out.containsKey("default"));
         assertFalse(out.containsKey("System"));
     }

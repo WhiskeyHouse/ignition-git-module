@@ -161,7 +161,7 @@ public class GitTagManagerTest {
 
     @Test
     public void isHiddenEntry_leavesNormalNamesAlone() {
-        assertFalse(GitTagManager.isHiddenEntry("WHK01"));
+        assertFalse(GitTagManager.isHiddenEntry("Plant01"));
         assertFalse(GitTagManager.isHiddenEntry("Cooker01"));
         assertFalse(GitTagManager.isHiddenEntry("_types_"));
         assertFalse(GitTagManager.isHiddenEntry("LoadRecipeTrigger.json"));
@@ -174,7 +174,7 @@ public class GitTagManagerTest {
         // Reproduces the TEC-3647 scenario: a stray .omc/ agent-state folder lives
         // inside an authored tag-folder tree. The importer must ignore it (and any
         // .json file with a leading dot) instead of producing an invalid '.omc' tag.
-        File providerRoot = tempFolder.newFolder("WHK01");
+        File providerRoot = tempFolder.newFolder("Plant01");
 
         File cooker = new File(providerRoot, "Cooker01");
         assertTrue(cooker.mkdirs());

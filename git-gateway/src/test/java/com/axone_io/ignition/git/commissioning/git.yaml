@@ -1,4 +1,4 @@
-- repo_uri: https://github.com/WHK01/whk-distillery01-mes-ui.git
+- repo_uri: https://github.com/example-org/example-mes-ui.git
   repo_branch: development
   ignition_projectName: WHK-MES
   ignition_userName: admin
@@ -11,7 +11,7 @@
   commissioning_importTags: true
   commissioning_importImages: true
   initDefaultBranch: main
-- repo_uri: https://github.com/WHK01/whk-distillery01-ignition-global.git
+- repo_uri: https://github.com/example-org/example-ignition-global.git
   repo_branch: development
   ignition_projectName: WHK-MES
   ignition_userName: admin

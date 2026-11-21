@@ -349,23 +349,23 @@ public class GitHubApiManagerTest {
 
     @Test
     public void parseOwnerRepo_httpsUrl() {
-        String[] result = GitHubApiManager.parseOwnerRepo("https://github.com/WHK01/whk-distillery01-mes-ui.git");
-        assertEquals("WHK01", result[0]);
-        assertEquals("whk-distillery01-mes-ui", result[1]);
+        String[] result = GitHubApiManager.parseOwnerRepo("https://github.com/example-org/example-mes-ui.git");
+        assertEquals("example-org", result[0]);
+        assertEquals("example-mes-ui", result[1]);
     }
 
     @Test
     public void parseOwnerRepo_httpsUrlNoGitSuffix() {
-        String[] result = GitHubApiManager.parseOwnerRepo("https://github.com/WHK01/whk-distillery01-mes-ui");
-        assertEquals("WHK01", result[0]);
-        assertEquals("whk-distillery01-mes-ui", result[1]);
+        String[] result = GitHubApiManager.parseOwnerRepo("https://github.com/example-org/example-mes-ui");
+        assertEquals("example-org", result[0]);
+        assertEquals("example-mes-ui", result[1]);
     }
 
     @Test
     public void parseOwnerRepo_sshUrl() {
-        String[] result = GitHubApiManager.parseOwnerRepo("git@github.com:WHK01/whk-distillery01-mes-ui.git");
-        assertEquals("WHK01", result[0]);
-        assertEquals("whk-distillery01-mes-ui", result[1]);
+        String[] result = GitHubApiManager.parseOwnerRepo("git@github.com:example-org/example-mes-ui.git");
+        assertEquals("example-org", result[0]);
+        assertEquals("example-mes-ui", result[1]);
     }
 
     @Test
@@ -406,14 +406,14 @@ public class GitHubApiManagerTest {
     @Test
     public void buildPrBody_includesAllFields() {
         String body = GitHubApiManager.buildPrBody(
-            "jsmith", "whk-distillery01", "WHK-MES",
+            "jsmith", "example-site", "WHK-MES",
             "hotfix/fix-pump-alarm", "abc1234",
             "Fix pump alarm threshold",
             new String[]{"resource/script/alarm_handler", "resource/view/pump_detail"}
         );
         assertTrue(body.contains("Already Live"));
         assertTrue(body.contains("jsmith"));
-        assertTrue(body.contains("whk-distillery01"));
+        assertTrue(body.contains("example-site"));
         assertTrue(body.contains("WHK-MES"));
         assertTrue(body.contains("hotfix/fix-pump-alarm"));
         assertTrue(body.contains("abc1234"));

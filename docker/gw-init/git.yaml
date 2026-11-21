@@ -1,4 +1,5 @@
-- repo_uri: https://github.com/WHK01/whk-distillery01-mes-ui.git
+# Sample entries: set each repo_uri to your real repository URI locally before starting the rig.
+- repo_uri: https://github.com/example-org/example-mes-ui.git
   repo_branch: development
   ignition_projectName: WHK-MES
   ignition_userName: admin
@@ -12,7 +13,7 @@
   commissioning_importImages: true
   commissioning_enforceBranch: false
   initDefaultBranch: main
-- repo_uri: https://github.com/WHK01/whk-distillery01-ignition-global.git
+- repo_uri: https://github.com/example-org/example-ignition-global.git
   repo_branch: development
   ignition_projectName: WHK-MES
   ignition_userName: admin
