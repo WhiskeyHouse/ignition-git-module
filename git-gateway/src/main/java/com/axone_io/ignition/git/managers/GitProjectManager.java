@@ -24,6 +24,8 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -46,7 +48,7 @@ public class GitProjectManager {
             ResourceCollectionManifest projectManifest = loadProjectManifest(projectDir);
             // The project write removes the top-level entries it was not given resources for,
             // and only module dirs are imported, so copy the rest aside and put them back after.
-            Path kept = copyNonModuleEntries(projectDir, moduleIds);
+            SavedEntries kept = copyNonModuleEntries(projectDir, moduleIds);
             try {
                 projectManager.createOrReplace(projectName, projectManifest, new ArrayList(resources));
             } finally {
@@ -65,9 +67,10 @@ public class GitProjectManager {
      * and tags/) to a temp dir, and returns it, or null when there is nothing to keep. .git is
      * left in place: the project write does not touch it, and copying it would read the whole
      * history. Symlinks are copied as links, never followed. A copy failure aborts the import
-     * before the project write, so nothing is deleted that could not be put back.
+     * before the project write, so nothing is deleted that could not be put back. The POSIX
+     * permissions of each saved dir are recorded so the restore can put them back too.
      */
-    static Path copyNonModuleEntries(Path projectDir, Set<String> moduleIds) throws IOException {
+    static SavedEntries copyNonModuleEntries(Path projectDir, Set<String> moduleIds) throws IOException {
         List<Path> entries = new ArrayList<>();
         try (Stream<Path> top = Files.list(projectDir)) {
             top.filter(p -> isKeptEntry(p, moduleIds)).forEach(entries::add);
@@ -76,15 +79,48 @@ public class GitProjectManager {
             return null;
         }
         Path kept = Files.createTempDirectory("ignition-git-keep-");
+        Map<Path, Set<PosixFilePermission>> dirModes = new HashMap<>();
         try {
             for (Path entry : entries) {
                 copyTree(entry, kept.resolve(entry.getFileName().toString()), false);
+                recordDirModes(projectDir, entry, dirModes);
             }
         } catch (IOException | RuntimeException e) {
             deleteQuietly(kept);
             throw e;
         }
-        return kept;
+        return new SavedEntries(kept, dirModes);
+    }
+
+    /** The temp dir holding the saved entries, and each saved dir's mode by project-relative path. */
+    static final class SavedEntries {
+        final Path dir;
+        final Map<Path, Set<PosixFilePermission>> dirModes;
+
+        SavedEntries(Path dir, Map<Path, Set<PosixFilePermission>> dirModes) {
+            this.dir = dir;
+            this.dirModes = dirModes;
+        }
+    }
+
+    /** Records the POSIX permissions of every dir under entry; does nothing on other filesystems. */
+    private static void recordDirModes(Path projectDir, Path entry, Map<Path, Set<PosixFilePermission>> dirModes)
+            throws IOException {
+        if (!Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        Files.walkFileTree(entry, new SimpleFileVisitor<Path>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                PosixFileAttributeView view = Files.getFileAttributeView(dir, PosixFileAttributeView.class,
+                        LinkOption.NOFOLLOW_LINKS);
+                if (view == null) {
+                    return FileVisitResult.TERMINATE;
+                }
+                dirModes.put(projectDir.relativize(dir), view.readAttributes().permissions());
+                return FileVisitResult.CONTINUE;
+            }
+        });
     }
 
     private static boolean isKeptEntry(Path entry, Set<String> moduleIds) {
@@ -104,26 +140,48 @@ public class GitProjectManager {
      * missing or its bytes differ, and a symlink when it is missing. The saved copies are the
      * files as they were on disk before the write, so local edits that are not committed are
      * kept as edited. The temp dir is removed afterwards; if anything could not be put back, it
-     * is left in place and named in the log so the files can be recovered by hand.
+     * is left in place and named in the log so the files can be recovered by hand. A saved file
+     * whose path is now a dir or a symlink counts as not put back. Saved dir modes are applied
+     * last, deepest first, so a restrictive mode cannot block copying the dir's children.
+     * Returns true when everything was put back.
      */
-    static void restoreNonModuleEntries(Path kept, Path projectDir) {
+    static boolean restoreNonModuleEntries(SavedEntries kept, Path projectDir) {
         if (kept == null) {
-            return;
+            return true;
         }
         try {
-            copyTree(kept, projectDir, true);
-            deleteQuietly(kept);
+            List<String> conflicts = copyTree(kept.dir, projectDir, true);
+            if (!conflicts.isEmpty()) {
+                logger.error("Could not restore non-resource files in " + projectDir
+                        + " after the project write, because these paths are now a dir or a symlink: "
+                        + conflicts + "; the files are saved in " + kept.dir);
+                return false;
+            }
+            List<Path> dirs = new ArrayList<>(kept.dirModes.keySet());
+            dirs.sort(Comparator.comparingInt(Path::getNameCount).reversed());
+            for (Path dir : dirs) {
+                PosixFileAttributeView view = Files.getFileAttributeView(projectDir.resolve(dir),
+                        PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+                if (view != null) {
+                    view.setPermissions(kept.dirModes.get(dir));
+                }
+            }
+            deleteQuietly(kept.dir);
+            return true;
         } catch (IOException | RuntimeException e) {
             logger.error("Could not restore non-resource files in " + projectDir
-                    + " after the project write; the files are saved in " + kept, e);
+                    + " after the project write; the files are saved in " + kept.dir, e);
+            return false;
         }
     }
 
     /**
      * Copies a tree without following symlinks. With onlyIfChanged, a regular file is written
-     * only when the target is missing or differs, and a symlink only when the target is missing.
+     * only when the target is missing or differs, and a symlink only when the target is missing;
+     * a regular file whose target is a dir or a symlink is not written and its path is returned.
      */
-    private static void copyTree(Path source, Path target, boolean onlyIfChanged) throws IOException {
+    private static List<String> copyTree(Path source, Path target, boolean onlyIfChanged) throws IOException {
+        List<String> conflicts = new ArrayList<>();
         Files.walkFileTree(source, new SimpleFileVisitor<Path>() {
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
@@ -144,14 +202,16 @@ public class GitProjectManager {
                     }
                 } else if (!onlyIfChanged || !exists) {
                     Files.copy(file, dest, StandardCopyOption.COPY_ATTRIBUTES);
-                } else if (Files.isRegularFile(dest, LinkOption.NOFOLLOW_LINKS)
-                        && Files.mismatch(file, dest) != -1) {
+                } else if (!Files.isRegularFile(dest, LinkOption.NOFOLLOW_LINKS)) {
+                    conflicts.add(dest.toString());
+                } else if (Files.mismatch(file, dest) != -1) {
                     Files.copy(file, dest, StandardCopyOption.REPLACE_EXISTING,
                             StandardCopyOption.COPY_ATTRIBUTES);
                 }
                 return FileVisitResult.CONTINUE;
             }
         });
+        return conflicts;
     }
 
     private static void deleteQuietly(Path root) {

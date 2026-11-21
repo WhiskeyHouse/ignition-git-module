@@ -366,6 +366,16 @@ public class GitProjectManagerTest {
      */
     private static ProjectManager deletingProjectManager(Path projectDir, Set<String> moduleIds,
                                                          List<Resource> received, boolean thenFail) {
+        return deletingProjectManager(projectDir, moduleIds, received, thenFail, () -> { });
+    }
+
+    private interface AfterWrite {
+        void run() throws IOException;
+    }
+
+    private static ProjectManager deletingProjectManager(Path projectDir, Set<String> moduleIds,
+                                                         List<Resource> received, boolean thenFail,
+                                                         AfterWrite afterWrite) {
         return (ProjectManager) Proxy.newProxyInstance(ProjectManager.class.getClassLoader(),
                 new Class<?>[]{ProjectManager.class}, (proxy, method, args) -> {
                     if (!"createOrReplace".equals(method.getName())) {
@@ -383,6 +393,7 @@ public class GitProjectManagerTest {
                             }
                         }
                     }
+                    afterWrite.run();
                     if (thenFail) {
                         throw new IOException("project write failed");
                     }
@@ -526,6 +537,51 @@ public class GitProjectManagerTest {
         assertEquals(outside, Files.readSymbolicLink(link));
         assertArrayEquals("the link target is untouched", "outside".getBytes(),
                 Files.readAllBytes(outside.resolve("x/big.bin")));
+    }
+
+    /**
+     * If the write leaves a dir where a saved file was, the file cannot be put back. That must
+     * count as a failed restore: the saved copy is kept and the failure is reported, instead of
+     * the backup being deleted with the uncommitted edit in it.
+     */
+    @Test
+    public void restoreConflictKeepsBackupAndReportsFailure() throws Exception {
+        Path dir = tmp.newFolder("project").toPath();
+        writeRepoFiles(dir);
+        byte[] edited = "edited: true\n".getBytes();
+        Files.write(dir.resolve("deploy/project.yaml"), edited);
+        ProjectManager pm = deletingProjectManager(dir, MODULE_IDS, new ArrayList<>(), false,
+                () -> Files.createDirectories(dir.resolve("deploy/project.yaml")));
+
+        GitProjectManager.SavedEntries kept = GitProjectManager.copyNonModuleEntries(dir, MODULE_IDS);
+        try {
+            pm.createOrReplace("TestProject", null, new ArrayList<>());
+            assertFalse("the restore reports the conflict",
+                    GitProjectManager.restoreNonModuleEntries(kept, dir));
+            assertArrayEquals("the saved copy is kept", edited,
+                    Files.readAllBytes(kept.dir.resolve("deploy/project.yaml")));
+        } finally {
+            deleteTree(kept.dir);
+        }
+    }
+
+    /**
+     * Saved dirs come back with their own mode, so a 0700 dir is not restored world-readable.
+     */
+    @Test
+    public void skippedDirModesAreKept() throws Exception {
+        Path dir = tmp.newFolder("project").toPath();
+        writeRepoFiles(dir);
+        Assume.assumeNotNull(Files.getFileAttributeView(dir, java.nio.file.attribute.PosixFileAttributeView.class));
+        Path secret = dir.resolve("deploy/private");
+        write(secret.resolve("config.yaml"), "a: 1");
+        Files.setPosixFilePermissions(secret, PosixFilePermissions.fromString("rwx------"));
+
+        GitProjectManager.importProject(deletingProjectManager(dir, MODULE_IDS, new ArrayList<>(), false),
+                dir, "TestProject", MODULE_IDS);
+
+        assertEquals("rwx------", PosixFilePermissions.toString(Files.getPosixFilePermissions(secret)));
+        assertArrayEquals("a: 1".getBytes(), Files.readAllBytes(secret.resolve("config.yaml")));
     }
 
     private static Resource find(Set<Resource> resources, String pathSuffix) {
