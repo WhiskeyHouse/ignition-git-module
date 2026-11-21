@@ -2,6 +2,7 @@ package com.axone_io.ignition.git.managers;
 
 import com.inductiveautomation.ignition.common.resourcecollection.Resource;
 import com.inductiveautomation.ignition.common.resourcecollection.ResourcePath;
+import com.inductiveautomation.ignition.gateway.project.ProjectManager;
 import org.junit.Assume;
 import org.junit.Rule;
 import org.junit.Test;
@@ -9,14 +10,23 @@ import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Proxy;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -345,6 +355,256 @@ public class GitProjectManagerTest {
             }
         } finally {
             Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rwx------"));
+        }
+    }
+
+    /**
+     * Stands in for the gateway ProjectManager. Its createOrReplace mimics Ignition's project
+     * write: it keeps project.json, .git and the module dirs it was given resources for, and
+     * removes every other top-level entry from the project dir. Symlinks are removed as links,
+     * never followed. The resources it was handed are recorded for assertions.
+     */
+    private static ProjectManager deletingProjectManager(Path projectDir, Set<String> moduleIds,
+                                                         List<Resource> received, boolean thenFail) {
+        return deletingProjectManager(projectDir, moduleIds, received, thenFail, () -> { });
+    }
+
+    private interface AfterWrite {
+        void run() throws IOException;
+    }
+
+    private static ProjectManager deletingProjectManager(Path projectDir, Set<String> moduleIds,
+                                                         List<Resource> received, boolean thenFail,
+                                                         AfterWrite afterWrite) {
+        return (ProjectManager) Proxy.newProxyInstance(ProjectManager.class.getClassLoader(),
+                new Class<?>[]{ProjectManager.class}, (proxy, method, args) -> {
+                    if (!"createOrReplace".equals(method.getName())) {
+                        throw new UnsupportedOperationException(method.getName());
+                    }
+                    @SuppressWarnings("unchecked")
+                    List<Resource> resources = (List<Resource>) args[2];
+                    received.addAll(resources);
+                    try (Stream<Path> top = Files.list(projectDir)) {
+                        for (Path entry : (Iterable<Path>) top::iterator) {
+                            String name = entry.getFileName().toString();
+                            if (!name.equals("project.json") && !name.equals(".git")
+                                    && !moduleIds.contains(name)) {
+                                deleteTree(entry);
+                            }
+                        }
+                    }
+                    afterWrite.run();
+                    if (thenFail) {
+                        throw new IOException("project write failed");
+                    }
+                    return null;
+                });
+    }
+
+    private static void deleteTree(Path path) throws IOException {
+        if (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+            Files.delete(path);
+            return;
+        }
+        Files.walkFileTree(path, new SimpleFileVisitor<Path>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Files.delete(file);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                Files.delete(dir);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
+    /** A project dir with committed files outside the module dirs, as a real project repo has. */
+    private Map<String, byte[]> writeRepoFiles(Path dir) throws Exception {
+        Map<String, byte[]> files = new HashMap<>();
+        files.put("deploy/project.yaml", "name: TestProject\n".getBytes());
+        files.put("deploy/tag-providers/Provider.json", "{\"name\":\"Provider\"}".getBytes());
+        files.put("images/logo.txt", "logo".getBytes());
+        files.put("tags/default/tags.json", "{\"tags\":[]}".getBytes());
+        files.put("README.md", "# readme\n".getBytes());
+        files.put(".gitignore", "*.tmp\n".getBytes());
+        files.put("docs/bin/data.bin", new byte[]{0, 1, 2, (byte) 0xff, 13, 10});
+        for (Map.Entry<String, byte[]> e : files.entrySet()) {
+            Path file = dir.resolve(e.getKey());
+            Files.createDirectories(file.getParent());
+            Files.write(file, e.getValue());
+        }
+        write(dir.resolve("project.json"), "{\"title\":\"TestProject\"}");
+        write(dir.resolve(".git/HEAD"), "ref: refs/heads/main");
+        writeView(dir.resolve("com.inductiveautomation.perspective/views/Main"));
+        return files;
+    }
+
+    /**
+     * Ignition's project write removes the top-level dirs it was not given resources for. Since
+     * only module dirs are imported, every committed file outside them (deploy/, images/, tags/,
+     * ...) was deleted from the working copy on each gateway start, and the module's own status
+     * then reported them as deleted. Those files must survive the import byte for byte, and they
+     * must still not be sent to the gateway as resources.
+     */
+    @Test
+    public void nonModuleFilesSurviveProjectImport() throws Exception {
+        Path dir = tmp.newFolder("project").toPath();
+        Map<String, byte[]> files = writeRepoFiles(dir);
+        List<Resource> received = new ArrayList<>();
+
+        GitProjectManager.importProject(deletingProjectManager(dir, MODULE_IDS, received, false),
+                dir, "TestProject", MODULE_IDS);
+
+        for (Map.Entry<String, byte[]> e : files.entrySet()) {
+            Path file = dir.resolve(e.getKey());
+            assertTrue(e.getKey() + " was deleted by the import", Files.exists(file));
+            assertArrayEquals(e.getKey() + " changed during the import", e.getValue(),
+                    Files.readAllBytes(file));
+        }
+        assertFalse("nothing was sent to the gateway", received.isEmpty());
+        for (Resource r : received) {
+            assertEquals("only module resources are sent: " + r.getResourcePath(),
+                    "com.inductiveautomation.perspective",
+                    r.getResourcePath().getResourceType().moduleId());
+        }
+    }
+
+    /**
+     * The files that come back are the ones on disk before the import, so a local edit that is
+     * not committed yet is kept as edited, not replaced with another version.
+     */
+    @Test
+    public void uncommittedEditsUnderSkippedDirsAreKept() throws Exception {
+        Path dir = tmp.newFolder("project").toPath();
+        writeRepoFiles(dir);
+        byte[] edited = "name: TestProject\nedited: true\n".getBytes();
+        Files.write(dir.resolve("deploy/project.yaml"), edited);
+        write(dir.resolve("deploy/new-untracked.yaml"), "a: 1");
+
+        GitProjectManager.importProject(deletingProjectManager(dir, MODULE_IDS, new ArrayList<>(), false),
+                dir, "TestProject", MODULE_IDS);
+
+        assertArrayEquals(edited, Files.readAllBytes(dir.resolve("deploy/project.yaml")));
+        assertArrayEquals("a: 1".getBytes(), Files.readAllBytes(dir.resolve("deploy/new-untracked.yaml")));
+    }
+
+    /**
+     * A failed project write must not leave the working copy without its non-module files.
+     */
+    @Test
+    public void nonModuleFilesSurviveAFailedProjectWrite() throws Exception {
+        Path dir = tmp.newFolder("project").toPath();
+        Map<String, byte[]> files = writeRepoFiles(dir);
+
+        try {
+            GitProjectManager.importProject(deletingProjectManager(dir, MODULE_IDS, new ArrayList<>(), true),
+                    dir, "TestProject", MODULE_IDS);
+            fail("a failed project write must fail the import");
+        } catch (RuntimeException expected) {
+            // importProject wraps the write failure
+        }
+
+        for (Map.Entry<String, byte[]> e : files.entrySet()) {
+            assertArrayEquals(e.getKey() + " was not kept", e.getValue(),
+                    Files.readAllBytes(dir.resolve(e.getKey())));
+        }
+    }
+
+    /**
+     * Symlinks under skipped dirs are kept as links and never followed: the target outside the
+     * project is not copied into the project, and the link itself comes back after the write.
+     */
+    @Test
+    public void symlinksUnderSkippedDirsAreKeptAsLinks() throws Exception {
+        Path dir = tmp.newFolder("project").toPath();
+        writeRepoFiles(dir);
+        Path outside = tmp.newFolder("outside").toPath();
+        write(outside.resolve("x/big.bin"), "outside");
+        Path link = dir.resolve("docs/out");
+        try {
+            Files.createSymbolicLink(link, outside);
+        } catch (UnsupportedOperationException | IOException e) {
+            Assume.assumeNoException("filesystem cannot create symlinks", e);
+        }
+
+        GitProjectManager.importProject(deletingProjectManager(dir, MODULE_IDS, new ArrayList<>(), false),
+                dir, "TestProject", MODULE_IDS);
+
+        assertTrue("the link is kept", Files.isSymbolicLink(link));
+        assertEquals(outside, Files.readSymbolicLink(link));
+        assertArrayEquals("the link target is untouched", "outside".getBytes(),
+                Files.readAllBytes(outside.resolve("x/big.bin")));
+    }
+
+    /**
+     * If the write leaves a dir where a saved file was, the file cannot be put back. That must
+     * count as a failed restore: the saved copy is kept and the failure is reported, instead of
+     * the backup being deleted with the uncommitted edit in it.
+     */
+    @Test
+    public void restoreConflictKeepsBackupAndReportsFailure() throws Exception {
+        Path dir = tmp.newFolder("project").toPath();
+        writeRepoFiles(dir);
+        byte[] edited = "edited: true\n".getBytes();
+        Files.write(dir.resolve("deploy/project.yaml"), edited);
+        ProjectManager pm = deletingProjectManager(dir, MODULE_IDS, new ArrayList<>(), false,
+                () -> Files.createDirectories(dir.resolve("deploy/project.yaml")));
+
+        GitProjectManager.SavedEntries kept = GitProjectManager.copyNonModuleEntries(dir, MODULE_IDS);
+        try {
+            pm.createOrReplace("TestProject", null, new ArrayList<>());
+            assertFalse("the restore reports the conflict",
+                    GitProjectManager.restoreNonModuleEntries(kept, dir));
+            assertArrayEquals("the saved copy is kept", edited,
+                    Files.readAllBytes(kept.dir.resolve("deploy/project.yaml")));
+        } finally {
+            deleteTree(kept.dir);
+        }
+    }
+
+    /**
+     * Saved dirs come back with their own mode, so a 0700 dir is not restored world-readable.
+     */
+    @Test
+    public void skippedDirModesAreKept() throws Exception {
+        Path dir = tmp.newFolder("project").toPath();
+        writeRepoFiles(dir);
+        Assume.assumeNotNull(Files.getFileAttributeView(dir, java.nio.file.attribute.PosixFileAttributeView.class));
+        Path secret = dir.resolve("deploy/private");
+        write(secret.resolve("config.yaml"), "a: 1");
+        Files.setPosixFilePermissions(secret, PosixFilePermissions.fromString("rwx------"));
+
+        GitProjectManager.importProject(deletingProjectManager(dir, MODULE_IDS, new ArrayList<>(), false),
+                dir, "TestProject", MODULE_IDS);
+
+        assertEquals("rwx------", PosixFilePermissions.toString(Files.getPosixFilePermissions(secret)));
+        assertArrayEquals("a: 1".getBytes(), Files.readAllBytes(secret.resolve("config.yaml")));
+    }
+
+    /**
+     * A restore conflict must not leave a saved 0700 dir more open than it was.
+     */
+    @Test
+    public void skippedDirModesAreKeptOnRestoreConflict() throws Exception {
+        Path dir = tmp.newFolder("project").toPath();
+        writeRepoFiles(dir);
+        Assume.assumeNotNull(Files.getFileAttributeView(dir, java.nio.file.attribute.PosixFileAttributeView.class));
+        Path secret = dir.resolve("deploy/private");
+        write(secret.resolve("config.yaml"), "a: 1");
+        Files.setPosixFilePermissions(secret, PosixFilePermissions.fromString("rwx------"));
+        ProjectManager pm = deletingProjectManager(dir, MODULE_IDS, new ArrayList<>(), false,
+                () -> Files.createDirectories(dir.resolve("deploy/project.yaml")));
+
+        GitProjectManager.SavedEntries kept = GitProjectManager.copyNonModuleEntries(dir, MODULE_IDS);
+        try {
+            pm.createOrReplace("TestProject", null, new ArrayList<>());
+            assertFalse(GitProjectManager.restoreNonModuleEntries(kept, dir));
+            assertEquals("rwx------", PosixFilePermissions.toString(Files.getPosixFilePermissions(secret)));
+        } finally {
+            deleteTree(kept.dir);
         }
     }
 
